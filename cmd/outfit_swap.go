@@ -5,6 +5,7 @@ import (
 	"img-cli/pkg/errors"
 	"img-cli/pkg/logger"
 	"img-cli/pkg/workflow"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +102,12 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(outfitPath); os.IsNotExist(err) {
 			return errors.ErrFileNotFound(outfitPath)
 		}
+	}
+
+	// Move external images to outfits folder if needed
+	outfitPath, err := moveToOutfitsIfExternal(outfitPath)
+	if err != nil {
+		return errors.Wrapf(err, errors.FileError, "failed to move outfit to outfits folder")
 	}
 
 	// Set default style if not specified
@@ -228,4 +235,88 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 		"images", len(result.Steps))
 
 	return nil
+}
+
+// moveToOutfitsIfExternal moves an image to the outfits folder if it's from an external location
+func moveToOutfitsIfExternal(imagePath string) (string, error) {
+	// Clean and convert to absolute path for comparison
+	absPath, err := filepath.Abs(imagePath)
+	if err != nil {
+		return imagePath, err
+	}
+
+	// Get the absolute path of the outfits directory
+	outfitsDir, err := filepath.Abs("outfits")
+	if err != nil {
+		return imagePath, err
+	}
+
+	// Create outfits directory if it doesn't exist
+	if err := os.MkdirAll(outfitsDir, 0755); err != nil {
+		return imagePath, err
+	}
+
+	// Check if the image is already in the outfits folder or a subfolder
+	relPath, err := filepath.Rel(outfitsDir, absPath)
+	if err == nil && !strings.HasPrefix(relPath, "..") {
+		// Image is already in outfits folder or subfolder
+		logger.Debug("Image already in outfits folder", "path", imagePath)
+		return imagePath, nil
+	}
+
+	// Check if file is a directory (batch processing case)
+	fileInfo, err := os.Stat(absPath)
+	if err != nil {
+		return imagePath, err
+	}
+
+	if fileInfo.IsDir() {
+		// Don't move directories, just return the original path
+		return imagePath, nil
+	}
+
+	// Image is external, move it to outfits folder
+	filename := filepath.Base(absPath)
+	destPath := filepath.Join(outfitsDir, filename)
+
+	// Check if destination already exists
+	if _, err := os.Stat(destPath); err == nil {
+		// File with same name exists, add timestamp to make it unique
+		ext := filepath.Ext(filename)
+		nameWithoutExt := strings.TrimSuffix(filename, ext)
+		timestamp := time.Now().Format("20060102_150405")
+		filename = fmt.Sprintf("%s_%s%s", nameWithoutExt, timestamp, ext)
+		destPath = filepath.Join(outfitsDir, filename)
+	}
+
+	// Open source file
+	sourceFile, err := os.Open(absPath)
+	if err != nil {
+		return imagePath, err
+	}
+	defer sourceFile.Close()
+
+	// Create destination file
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return imagePath, err
+	}
+	defer destFile.Close()
+
+	// Copy the file
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
+		return imagePath, err
+	}
+
+	logger.Info("Moved external image to outfits folder",
+		"from", absPath,
+		"to", destPath)
+
+	// Return the new path relative to current directory
+	relPath, err = filepath.Rel(".", destPath)
+	if err != nil {
+		// If relative path fails, just use the destination path
+		return destPath, nil
+	}
+	return relPath, nil
 }
