@@ -1,0 +1,1050 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"img-cli/pkg/generator"
+	"img-cli/pkg/workflow"
+	"log"
+	"math/rand"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/joho/godotenv"
+)
+
+func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
+
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		log.Fatal("Please set GEMINI_API_KEY environment variable or add it to .env file")
+	}
+
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	command := os.Args[1]
+	args := os.Args[2:]
+
+	orchestrator := workflow.NewOrchestrator(apiKey)
+
+	switch command {
+	case "analyze":
+		handleAnalyze(orchestrator, args)
+	case "generate":
+		handleGenerate(orchestrator, args)
+	case "workflow":
+		handleWorkflow(orchestrator, args)
+	case "batch":
+		handleBatch(orchestrator, args)
+	case "cache":
+		handleCache(orchestrator, args)
+	case "help":
+		printUsage()
+	default:
+		fmt.Printf("Unknown command: %s\n", command)
+		printUsage()
+		os.Exit(1)
+	}
+}
+
+func printUsage() {
+	fmt.Println(`Image Processing CLI
+
+Usage:
+  go run cmd/main.go <command> [options]
+
+Commands:
+  analyze <image>                  Analyze all types for an image
+  analyze <type> <image>           Analyze specific type
+    Types: outfit, visual_style, art_style
+
+  generate <type> <image> [prompt] [options] Generate an image
+    Types: outfit, style_transfer, art_style
+    Options for outfit: --send-original --outfit-ref <path>
+
+  workflow <type> <image> [options] Run a workflow
+    Types: outfit-variations, style-transfer, complete-transformation, cross-reference, outfit-swap,
+           use-art-style, analyze-style, create-style-guide
+
+  batch <directory> <outfit>       Process all images in directory (legacy mode)
+
+  cache <action>                   Manage analysis cache
+    Actions: stats, clear, clear-outfit, clear-visual_style, clear-art_style
+
+  help                            Show this help message
+
+Examples:
+  # Analyze commands
+  go run cmd/main.go analyze image.jpg
+  go run cmd/main.go analyze outfit image.jpg
+  go run cmd/main.go analyze visual_style reference.jpg
+  go run cmd/main.go analyze art_style illustration.png
+
+  # Generate commands
+  go run cmd/main.go generate outfit portrait.jpg "business suit"
+  go run cmd/main.go generate outfit portrait.jpg "business suit" --send-original --outfit-ref outfits/suit.png
+  go run cmd/main.go generate style_transfer image.jpg "dramatic lighting"
+  go run cmd/main.go generate art_style "" "a magical forest" --style-ref styles/fantasy_art.png
+
+  # Style workflows
+  go run cmd/main.go workflow analyze-style illustration.png
+  go run cmd/main.go workflow analyze-style illustrations/
+  go run cmd/main.go workflow create-style-guide illustration.png
+  go run cmd/main.go workflow create-style-guide illustrations/ --prompt "fantasy_style"
+  go run cmd/main.go workflow use-art-style "a brown dog sniffing a fire hydrant" --style-ref styles/cartoon_style.png
+  go run cmd/main.go workflow use-art-style photo.jpg --style-ref styles/watercolor.png
+
+  # Other workflows
+  go run cmd/main.go workflow outfit-variations portrait.jpg
+  go run cmd/main.go workflow style-transfer image.jpg --style-ref style.jpg
+  go run cmd/main.go workflow cross-reference portrait.jpg --outfit-ref outfit.jpg --style-ref style.jpg
+  go run cmd/main.go workflow outfit-swap input/judy.png --style-ref styles/
+
+  # Batch and cache
+  go run cmd/main.go batch subjects/ "casual outfit"
+  go run cmd/main.go cache stats
+  go run cmd/main.go cache clear-art_style`)
+}
+
+func handleAnalyze(orchestrator *workflow.Orchestrator, args []string) {
+	flags := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	noCache := flags.Bool("no-cache", false, "Disable cache for this analysis")
+
+	// Check if running "analyze all"
+	if len(args) == 1 {
+		// Single argument means analyze all types for this image
+		imagePath := args[0]
+
+		// Parse any flags
+		if len(args) > 1 {
+			flags.Parse(args[1:])
+		}
+
+		if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+			log.Fatalf("Image file not found: %s", imagePath)
+		}
+
+		if *noCache {
+			orchestrator.SetCacheEnabled(false)
+		}
+
+		fmt.Printf("Analyzing all types for %s...\n", filepath.Base(imagePath))
+
+		results, err := orchestrator.AnalyzeAll(imagePath)
+		if err != nil {
+			log.Fatalf("Analysis failed: %v", err)
+		}
+
+		// Print all results
+		for typ, result := range results {
+			fmt.Printf("\n=== %s Analysis ===\n", typ)
+			var prettyJSON bytes.Buffer
+			if err := json.Indent(&prettyJSON, result, "", "  "); err != nil {
+				fmt.Println(string(result))
+			} else {
+				fmt.Println(prettyJSON.String())
+			}
+		}
+
+		orchestrator.SetCacheEnabled(true)
+		return
+	}
+
+	// Parse flags for specific type analysis
+	if len(args) >= 2 {
+		flags.Parse(args[2:])
+	}
+
+	if len(args) < 2 {
+		fmt.Println("Usage:")
+		fmt.Println("  analyze <image>                   Analyze all types")
+		fmt.Println("  analyze <type> <image> [--no-cache]  Analyze specific type")
+		fmt.Println("Types: outfit, visual_style")
+		os.Exit(1)
+	}
+
+	analyzerType := args[0]
+	imagePath := args[1]
+
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		log.Fatalf("Image file not found: %s", imagePath)
+	}
+
+	if *noCache {
+		orchestrator.SetCacheEnabled(false)
+	}
+
+	fmt.Printf("Analyzing %s...\n", filepath.Base(imagePath))
+
+	result, err := orchestrator.AnalyzeImage(analyzerType, imagePath)
+	if err != nil {
+		log.Fatalf("Analysis failed: %v", err)
+	}
+
+	var prettyJSON bytes.Buffer
+	if err := json.Indent(&prettyJSON, result, "", "  "); err != nil {
+		fmt.Println(string(result))
+	} else {
+		fmt.Println(prettyJSON.String())
+	}
+
+	// Re-enable cache
+	orchestrator.SetCacheEnabled(true)
+}
+
+func handleGenerate(orchestrator *workflow.Orchestrator, args []string) {
+	flags := flag.NewFlagSet("generate", flag.ContinueOnError)
+	sendOriginal := flags.Bool("send-original", false, "Include outfit reference image in the request")
+	outfitRef := flags.String("outfit-ref", "", "Path to outfit reference image")
+
+	if len(args) < 2 {
+		fmt.Println("Usage: generate <type> <image> [prompt] [options]")
+		fmt.Println("Types: outfit, style_transfer")
+		fmt.Println("\nOptions:")
+		fmt.Println("  --send-original    Include outfit reference image in the request")
+		fmt.Println("  --outfit-ref PATH  Path to outfit reference image")
+		os.Exit(1)
+	}
+
+	generatorType := args[0]
+	imagePath := args[1]
+
+	// Parse flags from remaining args
+	var promptParts []string
+	flagArgs := []string{}
+	for i := 2; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "--") {
+			flagArgs = append(flagArgs, args[i:]...)
+			break
+		}
+		promptParts = append(promptParts, args[i])
+	}
+
+	prompt := strings.Join(promptParts, " ")
+
+	// Parse flags
+	if len(flagArgs) > 0 {
+		flags.Parse(flagArgs)
+	}
+
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		log.Fatalf("Image file not found: %s", imagePath)
+	}
+
+	now := time.Now()
+	dateFolder := now.Format("2006-01-02")
+	timestampFolder := now.Format("150405")
+	outputDir := filepath.Join("output", dateFolder, timestampFolder)
+
+	fmt.Printf("Generating %s image...\n", generatorType)
+	if *sendOriginal && *outfitRef != "" {
+		fmt.Printf("Including outfit reference: %s\n", filepath.Base(*outfitRef))
+	}
+
+	params := generator.GenerateParams{
+		ImagePath:       imagePath,
+		Prompt:          prompt,
+		OutputDir:       outputDir,
+		SendOriginal:    *sendOriginal,
+		OutfitReference: *outfitRef,
+	}
+
+	var result *generator.GenerateResult
+	var err error
+
+	result, err = orchestrator.GenerateImage(generatorType, params)
+	if err != nil {
+		log.Fatalf("Generation failed: %v", err)
+	}
+
+	fmt.Printf("✓ %s\n", result.Message)
+	fmt.Printf("Saved to: %s\n", result.OutputPath)
+}
+
+func handleWorkflow(orchestrator *workflow.Orchestrator, args []string) {
+	if len(args) < 2 {
+		fmt.Println("Usage: workflow <type> <image-or-text> [options]")
+		fmt.Println("Types: outfit-variations, style-transfer, complete-transformation, cross-reference, outfit-swap,")
+		fmt.Println("       use-art-style, analyze-style, create-style-guide")
+		fmt.Println("Options: --test <subject-name> to test on single subject from directory")
+		fmt.Println("         --style-ref <path> for style reference image")
+		fmt.Println("         --send-original Include outfit reference image in generation request")
+		os.Exit(1)
+	}
+
+	workflowType := args[0]
+	imagePath := args[1]
+
+	// Special handling for use-art-style and outfit-swap workflows which can take text as second arg
+	isTextPrompt := false
+	isDirectory := false
+
+	if workflowType == "use-art-style" {
+		// Check if the second arg is a file/directory or text prompt
+		fileInfo, err := os.Stat(imagePath)
+		if err != nil {
+			// Not a file/directory, treat as text prompt
+			isTextPrompt = true
+		} else {
+			isDirectory = fileInfo.IsDir()
+		}
+	} else if workflowType == "outfit-swap" {
+		// Check if the second arg is a file/directory or text outfit description
+		fileInfo, err := os.Stat(imagePath)
+		if err != nil {
+			// Not a file/directory, treat as text outfit description
+			isTextPrompt = true
+		} else {
+			isDirectory = fileInfo.IsDir()
+		}
+	} else {
+		// For other workflows, it must be a file or directory
+		fileInfo, err := os.Stat(imagePath)
+		if err != nil {
+			log.Fatalf("Path not found: %s", imagePath)
+		}
+		isDirectory = fileInfo.IsDir()
+	}
+
+	now := time.Now()
+	dateFolder := now.Format("2006-01-02")
+	timestampFolder := now.Format("150405")
+	outputDir := filepath.Join("output", dateFolder, timestampFolder)
+
+	options := workflow.WorkflowOptions{
+		OutputDir: outputDir,
+	}
+
+	flags := flag.NewFlagSet("workflow", flag.ContinueOnError)
+	flags.StringVar(&options.StyleReference, "style-ref", "", "Style reference image")
+	flags.StringVar(&options.StylePrompt, "style", "", "Style description")
+	flags.StringVar(&options.NewOutfit, "outfit", "", "New outfit description")
+	flags.StringVar(&options.OutfitReference, "outfit-ref", "", "Outfit reference image")
+	flags.BoolVar(&options.DebugPrompt, "debug-prompt", false, "Show generation prompts for debugging")
+	flags.BoolVar(&options.SendOriginal, "send-original", false, "Include outfit reference image in generation request")
+	flags.IntVar(&options.Variations, "variations", 1, "Number of variations to generate for each combination")
+
+	var outfitsList string
+	var testSubject string
+	var subjectsList string
+	flags.StringVar(&outfitsList, "outfits", "", "Comma-separated list of outfits")
+	flags.StringVar(&testSubject, "test", "", "Test with specific subject(s) (filename without extension, space-separated for multiple)")
+	flags.StringVar(&subjectsList, "subjects", "", "Alias for --test: specific subject(s) to process")
+
+	// Custom handling for special flags
+	for i := 0; i < len(args[2:]); i++ {
+		arg := args[2:][i]
+
+		if arg == "--hair-ref" {
+			// Check if next argument exists and is not another flag
+			if i+1 < len(args[2:]) && !strings.HasPrefix(args[2:][i+1], "--") {
+				options.HairReference = args[2:][i+1]
+			} else {
+				// --hair-ref with no argument means use hair from outfit reference
+				options.HairReference = "USE_OUTFIT_REF"
+			}
+		} else if arg == "--test" {
+			// Check if next argument exists and is not another flag
+			if i+1 < len(args[2:]) && !strings.HasPrefix(args[2:][i+1], "--") {
+				testSubject = args[2:][i+1]
+			} else {
+				// --test with no argument means 1 random subject
+				testSubject = "1"
+			}
+		} else if arg == "--subjects" {
+			// Check if next argument exists and is not another flag
+			if i+1 < len(args[2:]) && !strings.HasPrefix(args[2:][i+1], "--") {
+				subjectsList = args[2:][i+1]
+			} else {
+				// --subjects with no argument means 1 random subject
+				subjectsList = "1"
+			}
+		}
+	}
+
+	// Now parse other flags normally, but skip the ones we handled
+	filteredArgs := []string{}
+	skipNext := false
+	for i := 0; i < len(args[2:]); i++ {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		arg := args[2:][i]
+		if arg == "--hair-ref" || arg == "--test" || arg == "--subjects" {
+			// Skip this and potentially the next arg
+			if i+1 < len(args[2:]) && !strings.HasPrefix(args[2:][i+1], "--") {
+				skipNext = true
+			}
+			continue
+		}
+		filteredArgs = append(filteredArgs, arg)
+	}
+
+	if err := flags.Parse(filteredArgs); err != nil {
+		fmt.Printf("Error parsing flags: %v\n", err)
+		os.Exit(1)
+	}
+
+	if outfitsList != "" {
+		options.Outfits = strings.Split(outfitsList, ",")
+		for i := range options.Outfits {
+			options.Outfits[i] = strings.TrimSpace(options.Outfits[i])
+		}
+	}
+
+	// Handle --subjects as alias for --test, --subjects takes precedence
+	// Now supports numeric values for random selection
+	testSubjects := []string{}
+	randomCount := 0
+
+	subjectsInput := subjectsList
+	if subjectsInput == "" {
+		subjectsInput = testSubject
+	}
+
+	if subjectsInput != "" {
+		// Check if it's a number
+		if count, err := strconv.Atoi(subjectsInput); err == nil {
+			// It's a number - select that many random subjects
+			randomCount = count
+		} else {
+			// It's a list of specific subject names
+			testSubjects = strings.Fields(subjectsInput)
+		}
+	}
+
+	// Special handling for use-art-style with text prompt
+	if workflowType == "use-art-style" && isTextPrompt {
+		// imagePath is actually a text prompt in this case
+		options.Prompt = imagePath
+		imagePath = "" // No image path for text-to-image
+
+		fmt.Printf("Running use-art-style workflow with prompt: %s\n", options.Prompt)
+		result, err := orchestrator.RunWorkflow(workflowType, imagePath, options)
+		if err != nil {
+			log.Fatalf("Workflow failed: %v", err)
+		}
+
+		fmt.Printf("\n=== Workflow Complete ===\n")
+		fmt.Printf("Duration: %v\n", result.EndTime.Sub(result.StartTime))
+		for _, step := range result.Steps {
+			if step.OutputPath != "" {
+				fmt.Printf("Generated: %s\n", step.OutputPath)
+			}
+		}
+		fmt.Printf("Output directory: %s\n", outputDir)
+		return
+	}
+
+	// Special handling for outfit-swap workflow - always targets subjects folder
+	if workflowType == "outfit-swap" {
+		if isTextPrompt {
+			// Use text outfit description
+			options.OutfitText = imagePath
+			imagePath = "" // No image path for text-based outfit
+		}
+		handleOutfitSwapWorkflow(orchestrator, imagePath, options, testSubjects, randomCount, outputDir)
+		return
+	}
+
+	// Handle batch workflow processing
+	if isDirectory {
+		subjectsDir := imagePath
+		supportedExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp"}
+		var imageFiles []string
+
+		files, err := os.ReadDir(subjectsDir)
+		if err != nil {
+			log.Fatalf("Error reading directory: %v", err)
+		}
+
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+
+			// If test subjects are specified, only process those files
+			if len(testSubjects) > 0 {
+				baseName := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+				found := false
+				for _, subject := range testSubjects {
+					if baseName == subject {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
+			}
+
+			ext := strings.ToLower(filepath.Ext(file.Name()))
+			for _, supportedExt := range supportedExtensions {
+				if ext == supportedExt {
+					imageFiles = append(imageFiles, filepath.Join(subjectsDir, file.Name()))
+					break
+				}
+			}
+		}
+
+		if len(imageFiles) == 0 {
+			if testSubject != "" {
+				log.Fatalf("Test subject '%s' not found in %s", testSubject, subjectsDir)
+			} else {
+				log.Fatal("No image files found in directory")
+			}
+		}
+
+		fmt.Printf("\n=== Batch Workflow: %s ===\n", workflowType)
+		if len(testSubjects) > 0 {
+			fmt.Printf("TEST MODE: Processing only %v\n", testSubjects)
+		}
+		fmt.Printf("Found %d image(s)\n\n", len(imageFiles))
+
+		for i, imgPath := range imageFiles {
+			fmt.Printf("[%d/%d] Processing %s...\n", i+1, len(imageFiles), filepath.Base(imgPath))
+
+			result, err := orchestrator.RunWorkflow(workflowType, imgPath, options)
+			if err != nil {
+				fmt.Printf("  ✗ Error: %v\n", err)
+				continue
+			}
+
+			fmt.Printf("  ✓ Completed in %v\n", result.EndTime.Sub(result.StartTime))
+			for _, step := range result.Steps {
+				if step.OutputPath != "" {
+					fmt.Printf("    - Generated: %s\n", filepath.Base(step.OutputPath))
+				}
+			}
+
+			if i < len(imageFiles)-1 {
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		fmt.Printf("\n=== All workflows complete ===\n")
+		fmt.Printf("Output directory: %s\n", outputDir)
+	} else {
+		// Single image workflow
+		fmt.Printf("Running %s workflow...\n", workflowType)
+
+		result, err := orchestrator.RunWorkflow(workflowType, imagePath, options)
+		if err != nil {
+			log.Fatalf("Workflow failed: %v", err)
+		}
+
+		fmt.Printf("\n=== Workflow Complete ===\n")
+		fmt.Printf("Duration: %v\n", result.EndTime.Sub(result.StartTime))
+		fmt.Printf("Steps completed: %d\n", len(result.Steps))
+
+		for _, step := range result.Steps {
+			if step.OutputPath != "" {
+				fmt.Printf("  - Generated: %s\n", step.OutputPath)
+			}
+		}
+
+		fmt.Printf("\nOutput directory: %s\n", outputDir)
+	}
+}
+
+func handleBatch(orchestrator *workflow.Orchestrator, args []string) {
+	setupInterruptHandler()
+
+	flags := flag.NewFlagSet("batch", flag.ContinueOnError)
+	testSubject := flags.String("test", "", "Test with specific subject(s) (filename without extension, space-separated for multiple)")
+	subjectsList := flags.String("subjects", "", "Alias for --test: specific subject(s) to process")
+
+	// Separate flags from positional args
+	flagArgs := []string{}
+	positionalArgs := []string{}
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "--") {
+			flagArgs = append(flagArgs, args[i:]...)
+			break
+		}
+		positionalArgs = append(positionalArgs, arg)
+	}
+
+	if len(positionalArgs) < 2 {
+		fmt.Println("Usage: batch <directory> <outfit> [--test subject-name] [--subjects subject-names]")
+		os.Exit(1)
+	}
+
+	subjectsDir := positionalArgs[0]
+	outfit := strings.Join(positionalArgs[1:], " ")
+
+	// Parse flags
+	if len(flagArgs) > 0 {
+		if err := flags.Parse(flagArgs); err != nil {
+			fmt.Printf("Error parsing flags: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Handle --subjects as alias for --test, --subjects takes precedence
+	// Now supports numeric values for random selection
+	testSubjects := []string{}
+	randomCount := 0
+
+	subjectsInput := *subjectsList
+	if subjectsInput == "" {
+		subjectsInput = *testSubject
+	}
+
+	if subjectsInput != "" {
+		// Check if it's a number
+		if count, err := strconv.Atoi(subjectsInput); err == nil {
+			// It's a number - select that many random subjects
+			randomCount = count
+		} else {
+			// It's a list of specific subject names
+			testSubjects = strings.Fields(subjectsInput)
+		}
+	}
+
+	if _, err := os.Stat(subjectsDir); os.IsNotExist(err) {
+		log.Fatalf("Directory not found: %s", subjectsDir)
+	}
+
+	supportedExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp"}
+	var allImageFiles []string
+	var imageFiles []string
+
+	files, err := os.ReadDir(subjectsDir)
+	if err != nil {
+		log.Fatalf("Error reading directory: %v", err)
+	}
+
+	// First, collect all available image files
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(file.Name()))
+		for _, supportedExt := range supportedExtensions {
+			if ext == supportedExt {
+				allImageFiles = append(allImageFiles, filepath.Join(subjectsDir, file.Name()))
+				break
+			}
+		}
+	}
+
+	// Now determine which files to process
+	if randomCount > 0 {
+		// Random selection mode
+		if randomCount > len(allImageFiles) {
+			randomCount = len(allImageFiles)
+		}
+
+		// Shuffle and select
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(allImageFiles), func(i, j int) {
+			allImageFiles[i], allImageFiles[j] = allImageFiles[j], allImageFiles[i]
+		})
+		imageFiles = allImageFiles[:randomCount]
+	} else if len(testSubjects) > 0 {
+		// Specific subjects mode
+		for _, file := range allImageFiles {
+			baseName := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+			for _, subject := range testSubjects {
+				if baseName == subject {
+					imageFiles = append(imageFiles, file)
+					break
+				}
+			}
+		}
+		if len(imageFiles) == 0 {
+			log.Fatalf("Test subjects %v not found in %s", testSubjects, subjectsDir)
+		}
+	} else {
+		// Process all files
+		imageFiles = allImageFiles
+	}
+
+	if len(imageFiles) == 0 {
+		log.Fatal("No image files found in directory")
+	}
+
+	now := time.Now()
+	dateFolder := now.Format("2006-01-02")
+	timestampFolder := now.Format("150405")
+	outputDir := filepath.Join("output", dateFolder, timestampFolder)
+
+	fmt.Printf("\n=== Batch Processing ===\n")
+	if randomCount > 0 {
+		fmt.Printf("RANDOM MODE: Selected %d subject(s)\n", randomCount)
+	} else if len(testSubjects) > 0 {
+		fmt.Printf("TEST MODE: Processing only %v\n", testSubjects)
+	}
+	fmt.Printf("Found %d image(s)\n", len(imageFiles))
+	fmt.Printf("Outfit: %s\n\n", outfit)
+
+	for i, imagePath := range imageFiles {
+		if stopProcessing {
+			fmt.Printf("\n[!] Processing interrupted by user. Stopping batch operation.\n")
+			break
+		}
+		fmt.Printf("[%d/%d] Processing %s...\n", i+1, len(imageFiles), filepath.Base(imagePath))
+
+		result, err := orchestrator.GenerateImage("outfit", generator.GenerateParams{
+			ImagePath: imagePath,
+			Prompt:    outfit,
+			OutputDir: outputDir,
+		})
+
+		if err != nil {
+			fmt.Printf("  ✗ Error: %v\n", err)
+			continue
+		}
+
+		fmt.Printf("  ✓ Saved: %s\n", result.OutputPath)
+
+		if i < len(imageFiles)-1 {
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	if stopProcessing {
+		fmt.Printf("\n=== Processing stopped by user ===\n")
+	} else {
+		fmt.Printf("\n=== Processing complete ===\n")
+	}
+	fmt.Printf("Generated images saved in: %s\n", outputDir)
+}
+
+// Global variable to track if we should stop processing
+var stopProcessing = false
+
+func setupInterruptHandler() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		fmt.Println("\n\n[!] Interrupt received. Finishing current task then stopping...")
+		fmt.Println("[!] Press Ctrl+C again to force quit immediately")
+		stopProcessing = true
+
+		// If pressed again, force quit
+		<-c
+		fmt.Println("\n[!] Force quit")
+		os.Exit(1)
+	}()
+}
+
+func handleOutfitSwapWorkflow(orchestrator *workflow.Orchestrator, sourcePath string, options workflow.WorkflowOptions, testSubjects []string, randomCount int, outputDir string) {
+	setupInterruptHandler()
+	subjectsDir := "subjects"
+
+	// Check if using text outfit description
+	if sourcePath == "" && options.OutfitText != "" {
+		// Text-based outfit - apply to subjects
+		fmt.Printf("\n=== Outfit Swap (Text) ===\n")
+		fmt.Printf("Outfit description: %s\n", options.OutfitText)
+		applyOutfitToSubjects(orchestrator, "", options, testSubjects, randomCount, subjectsDir)
+
+		if stopProcessing {
+			fmt.Printf("\n=== Outfit swap stopped by user ===\n")
+		} else {
+			fmt.Printf("\n=== Outfit swap complete ===\n")
+		}
+		fmt.Printf("Output directory: %s\n", outputDir)
+		return
+	}
+
+	// Check if source is a directory (batch outfit sources)
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		log.Fatalf("Source path not found: %s", sourcePath)
+	}
+
+	if sourceInfo.IsDir() {
+		// Multiple outfit sources - apply each to subjects
+		supportedExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp"}
+		var outfitFiles []string
+
+		sourceFiles, err := os.ReadDir(sourcePath)
+		if err != nil {
+			log.Fatalf("Error reading source directory: %v", err)
+		}
+
+		for _, file := range sourceFiles {
+			if file.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(file.Name()))
+			for _, supportedExt := range supportedExtensions {
+				if ext == supportedExt {
+					outfitFiles = append(outfitFiles, filepath.Join(sourcePath, file.Name()))
+					break
+				}
+			}
+		}
+
+		if len(outfitFiles) == 0 {
+			log.Fatal("No image files found in source directory")
+		}
+
+		fmt.Printf("\n=== Batch Outfit Swap ===\n")
+		fmt.Printf("Found %d outfit source(s)\n", len(outfitFiles))
+
+		// For each outfit source, apply to subjects
+		for i, outfitPath := range outfitFiles {
+			if stopProcessing {
+				fmt.Printf("\n[!] Processing interrupted by user. Stopping batch operation.\n")
+				break
+			}
+
+			fmt.Printf("\n[%d/%d] Outfit source: %s\n", i+1, len(outfitFiles), filepath.Base(outfitPath))
+			applyOutfitToSubjects(orchestrator, outfitPath, options, testSubjects, randomCount, subjectsDir)
+
+			if i < len(outfitFiles)-1 {
+				time.Sleep(2 * time.Second)
+			}
+		}
+	} else {
+		// Single outfit source - apply to subjects
+		fmt.Printf("\n=== Outfit Swap ===\n")
+		fmt.Printf("Outfit source: %s\n", filepath.Base(sourcePath))
+		applyOutfitToSubjects(orchestrator, sourcePath, options, testSubjects, randomCount, subjectsDir)
+	}
+
+	if stopProcessing {
+		fmt.Printf("\n=== Outfit swap stopped by user ===\n")
+	} else {
+		fmt.Printf("\n=== Outfit swap complete ===\n")
+	}
+	fmt.Printf("Output directory: %s\n", outputDir)
+}
+
+func applyOutfitToSubjects(orchestrator *workflow.Orchestrator, outfitPath string, options workflow.WorkflowOptions, testSubjects []string, randomCount int, subjectsDir string) {
+	// Get all subject images first
+	supportedExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp"}
+	var allSubjectFiles []string
+	var subjectFiles []string
+
+	files, err := os.ReadDir(subjectsDir)
+	if err != nil {
+		log.Fatalf("Error reading subjects directory: %v", err)
+	}
+
+	// First, collect all available subject files
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(file.Name()))
+		for _, supportedExt := range supportedExtensions {
+			if ext == supportedExt {
+				allSubjectFiles = append(allSubjectFiles, filepath.Join(subjectsDir, file.Name()))
+				break
+			}
+		}
+	}
+
+	// Now determine which subjects to process
+	if randomCount > 0 {
+		// Random selection mode
+		if randomCount > len(allSubjectFiles) {
+			randomCount = len(allSubjectFiles)
+		}
+
+		// Shuffle and select
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(allSubjectFiles), func(i, j int) {
+			allSubjectFiles[i], allSubjectFiles[j] = allSubjectFiles[j], allSubjectFiles[i]
+		})
+		subjectFiles = allSubjectFiles[:randomCount]
+
+		fmt.Printf("RANDOM MODE: Selected %d subject(s)\n", randomCount)
+	} else if len(testSubjects) > 0 {
+		// Specific subjects mode
+		for _, file := range allSubjectFiles {
+			baseName := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+			for _, subject := range testSubjects {
+				if baseName == subject {
+					subjectFiles = append(subjectFiles, file)
+					break
+				}
+			}
+		}
+		if len(subjectFiles) == 0 {
+			log.Fatalf("Test subjects %v not found in %s", testSubjects, subjectsDir)
+		}
+		fmt.Printf("TEST MODE: Processing only %v\n", testSubjects)
+	} else {
+		// Process all subjects
+		subjectFiles = allSubjectFiles
+	}
+
+	if len(subjectFiles) == 0 {
+		log.Fatalf("No image files found in %s directory", subjectsDir)
+	}
+
+	fmt.Printf("Applying to %d subject(s)\n", len(subjectFiles))
+
+	// Check if style-ref is a directory
+	var styleFiles []string
+	if options.StyleReference != "" {
+		styleInfo, err := os.Stat(options.StyleReference)
+		if err == nil && styleInfo.IsDir() {
+			// Style reference is a directory - get all style files
+			styleDirFiles, err := os.ReadDir(options.StyleReference)
+			if err != nil {
+				log.Fatalf("Error reading style directory: %v", err)
+			}
+
+			for _, file := range styleDirFiles {
+				if file.IsDir() {
+					continue
+				}
+				ext := strings.ToLower(filepath.Ext(file.Name()))
+				for _, supportedExt := range supportedExtensions {
+					if ext == supportedExt {
+						styleFiles = append(styleFiles, filepath.Join(options.StyleReference, file.Name()))
+						break
+					}
+				}
+			}
+
+			if len(styleFiles) == 0 {
+				log.Fatalf("No image files found in style directory: %s", options.StyleReference)
+			}
+
+			fmt.Printf("Found %d style(s) to apply\n", len(styleFiles))
+		} else {
+			// Single style file
+			styleFiles = []string{options.StyleReference}
+		}
+	} else {
+		// No style reference - use empty string
+		styleFiles = []string{""}
+	}
+
+	// Process each combination of subject and style
+	totalCombinations := len(subjectFiles) * len(styleFiles)
+	combinationCount := 0
+
+	for _, stylePath := range styleFiles {
+		if stopProcessing {
+			fmt.Printf("\n[!] Processing interrupted by user. Stopping batch operation.\n")
+			break
+		}
+
+		// Update options with current style
+		originalStyleRef := options.StyleReference
+		options.StyleReference = stylePath
+
+		if stylePath != "" {
+			fmt.Printf("\n  Style: %s\n", filepath.Base(stylePath))
+		}
+
+		for j, subjectPath := range subjectFiles {
+			if stopProcessing {
+				fmt.Printf("\n[!] Processing interrupted by user. Stopping batch operation.\n")
+				break
+			}
+
+			combinationCount++
+			if len(styleFiles) > 1 {
+				fmt.Printf("  [%d/%d] Subject: %s with Style: %s\n",
+					combinationCount, totalCombinations,
+					filepath.Base(subjectPath), filepath.Base(stylePath))
+			} else {
+				fmt.Printf("  [%d/%d] Subject: %s\n", j+1, len(subjectFiles), filepath.Base(subjectPath))
+			}
+
+			options.TargetImage = subjectPath
+			result, err := orchestrator.RunWorkflow("outfit-swap", outfitPath, options)
+			if err != nil {
+				fmt.Printf(" ✗ Error: %v\n", err)
+				continue
+			}
+
+			fmt.Printf(" ✓ Completed in %v\n", result.EndTime.Sub(result.StartTime))
+
+			// Add delay between generations
+			if combinationCount < totalCombinations {
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		// Restore original style reference for next iteration
+		options.StyleReference = originalStyleRef
+	}
+}
+
+func handleCache(orchestrator *workflow.Orchestrator, args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: cache <action>")
+		fmt.Println("Actions: stats, clear, clear-outfit, clear-visual_style, clear-art_style")
+		os.Exit(1)
+	}
+
+	action := args[0]
+	cache := orchestrator.GetCache()
+
+	switch action {
+	case "stats":
+		stats, err := cache.Stats()
+		if err != nil {
+			log.Fatalf("Failed to get cache stats: %v", err)
+		}
+		fmt.Println("\n=== Cache Statistics ===")
+		fmt.Printf("Cache directory: %s\n", stats["cache_dir"])
+		fmt.Printf("Total entries: %d\n", stats["total_entries"])
+		fmt.Printf("TTL: %.0f hours\n", stats["ttl_hours"])
+		if byType, ok := stats["by_type"].(map[string]int); ok {
+			fmt.Println("\nEntries by type:")
+			for typ, count := range byType {
+				fmt.Printf("  %s: %d\n", typ, count)
+			}
+		}
+
+	case "clear":
+		if err := cache.Clear(); err != nil {
+			log.Fatalf("Failed to clear cache: %v", err)
+		}
+		fmt.Println("Cache cleared successfully")
+
+	case "clear-outfit":
+		if err := cache.ClearType("outfit"); err != nil {
+			log.Fatalf("Failed to clear outfit cache: %v", err)
+		}
+		fmt.Println("Outfit analysis cache cleared")
+
+	case "clear-visual_style":
+		if err := cache.ClearType("visual_style"); err != nil {
+			log.Fatalf("Failed to clear visual style cache: %v", err)
+		}
+		fmt.Println("Visual style analysis cache cleared")
+
+	case "clear-art_style":
+		if err := cache.ClearType("art_style"); err != nil {
+			log.Fatalf("Failed to clear art style cache: %v", err)
+		}
+		fmt.Println("Art style analysis cache cleared")
+
+	default:
+		fmt.Printf("Unknown cache action: %s\n", action)
+		fmt.Println("Valid actions: stats, clear, clear-outfit, clear-visual_style, clear-art_style")
+		os.Exit(1)
+	}
+}

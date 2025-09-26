@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go run:*)",
+      "Bash(where go)",
+      "Bash(echo $PATH)",
+      "Bash(powershell:*)",
+      "Bash(go build:*)",
+      "Bash(./image-app.exe help)",
+      "Bash(./image-app.exe cache stats)",
+      "Bash(./image-app.exe cache clear-outfit)",
+      "Bash(./image-app.exe cache clear)",
+      "Bash(./image-app.exe cache clear-visual_style)",
+      "Bash(go get:*)",
+      "Bash(cmd /c \"dir subjects\\*.png 2>nul\")",
+      "Bash(./image-app.exe analyze:*)",
+      "Bash(./image-app.exe workflow:*)",
+      "Bash(cmd /c:*)",
+      "Bash(findstr:*)",
+      "Bash(dir)",
+      "Bash(./image-app.exe --help)",
+      "Bash(dir:*)",
+      "Bash(./image-cli.exe help:*)",
+      "Bash(./image-cli.exe generate:*)",
+      "Bash(./image-cli.exe:*)",
+      "Bash(find:*)",
+      "Bash(./test-cache.exe cache stats)",
+      "Bash(echo:*)",
+      "Bash(./img-cli.exe:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -1,0 +1,57 @@
+# Environment files
+.env
+.env.local
+
+# Project-specific directories
+outfits/
+styles/
+subjects/
+output/
+hair/
+
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+img-cli
+test-cache
+
+# Test files
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go build cache
+/vendor/
+/bin/
+/dist/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go module files
+go.work
+go.work.sum
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+tmp/
+temp/
+
+# Debug files
+debug
+__debug_bin*
+
+# Air config (for hot reload)
+.air.toml
+tmp/
