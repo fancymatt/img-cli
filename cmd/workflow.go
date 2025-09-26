@@ -18,6 +18,7 @@ var (
 	workflowStyleRef  string
 	workflowPrompt    string
 	workflowSendOrig  bool
+	workflowVariations int
 )
 
 // workflowCmd represents the workflow command
@@ -47,6 +48,7 @@ func init() {
 	workflowCmd.Flags().StringVar(&workflowStyleRef, "style-ref", "", "Path to style reference")
 	workflowCmd.Flags().StringVar(&workflowPrompt, "prompt", "", "Additional prompt text")
 	workflowCmd.Flags().BoolVar(&workflowSendOrig, "send-original", false, "Include reference images in requests")
+	workflowCmd.Flags().IntVar(&workflowVariations, "variations", 1, "Number of variations to generate per combination")
 }
 
 func runWorkflow(cmd *cobra.Command, args []string) error {
@@ -103,6 +105,7 @@ func runWorkflow(cmd *cobra.Command, args []string) error {
 		StyleReference:  workflowStyleRef,
 		Prompt:          workflowPrompt,
 		SendOriginal:    workflowSendOrig,
+		Variations:      workflowVariations,
 	}
 
 	// For outfit-swap workflow with --test flag, set the target image
