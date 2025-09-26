@@ -122,26 +122,10 @@ func (c *Cache) Get(analysisType, filePath string) (json.RawMessage, bool) {
 		return nil, false
 	}
 
-	// Check if cache is expired
-	if time.Since(entry.Timestamp) > c.ttl {
-		os.Remove(cachePath)
-		return nil, false
-	}
-
-	// Check if file has changed by comparing content hash
-	// This works even if the file has been moved
-	currentHash, err := c.getFileHash(filePath)
-	if err != nil {
-		// File might not exist at current path, but cache is still valid
-		// if another file with same name exists elsewhere
-		return entry.Data, true
-	}
-
-	if currentHash != entry.FileHash {
-		// File content has changed, invalidate cache
-		os.Remove(cachePath)
-		return nil, false
-	}
+	// IMPORTANT: Always use cached version if it exists
+	// This allows manual edits to be preserved
+	// We don't check TTL expiration or file hash changes
+	// The cache is based purely on filename, not path or content
 
 	return entry.Data, true
 }
@@ -149,6 +133,13 @@ func (c *Cache) Get(analysisType, filePath string) (json.RawMessage, bool) {
 func (c *Cache) Set(analysisType, filePath string, data json.RawMessage) error {
 	key := c.generateKey(analysisType, filePath)
 	cachePath := filepath.Join(c.cacheDir, key+".json")
+
+	// IMPORTANT: Never overwrite existing cache files
+	// This preserves manual edits made to cache files
+	if _, err := os.Stat(cachePath); err == nil {
+		// Cache file already exists, don't overwrite it
+		return nil
+	}
 
 	absPath, _ := filepath.Abs(filePath)
 	fileHash, err := c.getFileHash(filePath)

@@ -11,7 +11,7 @@ import (
 	"img-cli/pkg/cache"
 	"img-cli/pkg/generator"
 	"img-cli/pkg/gemini"
-	"os"
+	"img-cli/pkg/logger"
 	"path/filepath"
 	"strings"
 	"time"
@@ -93,23 +93,31 @@ func (o *Orchestrator) AnalyzeImage(analyzerType string, imagePath string) (json
 	}
 
 	// Try to get from cache
-	fileInfo, _ := os.Stat(imagePath)
-	cached, found := c.Get(filepath.Base(imagePath), imagePath)
+	cached, found := c.Get(analyzerType, imagePath)
 	if found {
-		// Parse the cached data to extract the analysis
+		logger.Debug("Using cached analysis",
+			"type", analyzerType,
+			"file", filepath.Base(imagePath))
+
+		// Check if cached data is the raw analysis or wrapped in a cache entry
+		// First try to parse as cache entry structure
 		var cacheEntry struct {
 			Timestamp   time.Time       `json:"timestamp"`
 			Description string          `json:"description"`
 			Analysis    json.RawMessage `json:"analysis"`
 		}
-		if err := json.Unmarshal(cached, &cacheEntry); err == nil {
-			if cacheEntry.Analysis != nil {
-				return cacheEntry.Analysis, nil
-			}
+		if err := json.Unmarshal(cached, &cacheEntry); err == nil && cacheEntry.Analysis != nil {
+			return cacheEntry.Analysis, nil
 		}
+		// If that fails, try using the cached data directly as analysis
+		// This handles manually edited cache files that might only contain the analysis
+		return cached, nil
 	}
 
-	// Not in cache or error reading cache, perform analysis
+	// Not in cache, perform analysis
+	logger.Debug("Performing new analysis",
+		"type", analyzerType,
+		"file", filepath.Base(imagePath))
 	result, err := analyzer.Analyze(imagePath)
 	if err != nil {
 		return nil, err
@@ -127,8 +135,8 @@ func (o *Orchestrator) AnalyzeImage(analyzerType string, imagePath string) (json
 	}
 
 	cacheData, err := json.Marshal(cacheEntry)
-	if err == nil && fileInfo != nil {
-		c.Set(filepath.Base(imagePath), imagePath, cacheData)
+	if err == nil {
+		c.Set(analyzerType, imagePath, cacheData)
 	}
 
 	return result, nil
