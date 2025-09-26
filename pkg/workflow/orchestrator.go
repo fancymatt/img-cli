@@ -489,45 +489,102 @@ func (o *Orchestrator) runCrossReferenceWorkflow(imagePath string, options Workf
 }
 
 func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	// outfitSourcePath is the outfit/style reference (single image or empty for text)
-	// The workflow will apply this to a target subject
 	result := &WorkflowResult{
 		Workflow:  "outfit-swap",
 		StartTime: time.Now(),
 		Steps:     []StepResult{},
 	}
 
-	var outfitPrompt string
-	var hairDataFromOutfit json.RawMessage
+	// The target must be specified - it's the subject to apply the outfit to
+	if options.TargetImage == "" {
+		return nil, fmt.Errorf("target subject must be specified for outfit-swap workflow")
+	}
+	targetImage := options.TargetImage
+	fmt.Printf("Applying to subject: %s\n", filepath.Base(targetImage))
 
-	// Check if using text outfit description
+	// Determine number of variations to generate
+	variations := options.Variations
+	if variations < 1 {
+		variations = 1
+	}
+
+	// Collect outfit files - either single file or all files from directory
+	var outfitFiles []string
+
 	if outfitSourcePath == "" && options.OutfitText != "" {
-		// Use the text outfit description directly
-		outfitPrompt = options.OutfitText
-		fmt.Printf("Using outfit description: %s\n", outfitPrompt)
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "text_outfit",
-			Name: "outfit_description",
-			Message: outfitPrompt,
-		})
+		// Text-based outfit description
+		outfitFiles = []string{""} // Empty string signals text mode
+		fmt.Printf("Using text outfit description\n")
 	} else if outfitSourcePath != "" {
-		// Analyze outfit from the source image
-		fmt.Printf("Analyzing outfit from: %s\n", filepath.Base(outfitSourcePath))
-
-		outfitData, err := o.AnalyzeImage("outfit", outfitSourcePath)
+		// Check if outfit source is a directory
+		fileInfo, err := gemini.GetFileInfo(outfitSourcePath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to analyze outfit from %s: %w", filepath.Base(outfitSourcePath), err)
+			return nil, fmt.Errorf("failed to access outfit path %s: %w", outfitSourcePath, err)
 		}
 
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "outfit_source",
-			Data: outfitData,
-		})
+		if fileInfo.IsDir() {
+			// Get all images from the directory
+			images, err := gemini.GetImagesFromDirectory(outfitSourcePath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read outfit directory %s: %w", outfitSourcePath, err)
+			}
+			if len(images) == 0 {
+				return nil, fmt.Errorf("no image files found in outfit directory %s", outfitSourcePath)
+			}
+			outfitFiles = images
+			fmt.Printf("Found %d outfit images in directory\n", len(outfitFiles))
+		} else {
+			// Single outfit file
+			outfitFiles = []string{outfitSourcePath}
+		}
+	} else {
+		return nil, fmt.Errorf("no outfit source provided: either specify an outfit image path or use --outfit-text")
+	}
 
-		// Extract outfit description and hair data
-		var outfit gemini.OutfitDescription
+	// Process each outfit
+	for outfitIndex, outfitPath := range outfitFiles {
+		var outfitPrompt string
+		var hairDataFromOutfit json.RawMessage
+		var outfitSourceName string
+
+		// Handle text outfit vs image outfit
+		if outfitPath == "" && options.OutfitText != "" {
+			// Text outfit mode
+			outfitPrompt = options.OutfitText
+			outfitSourceName = "text_outfit"
+			if len(outfitFiles) > 1 {
+				fmt.Printf("\n[Outfit %d/%d] Using text description\n", outfitIndex+1, len(outfitFiles))
+			}
+
+			result.Steps = append(result.Steps, StepResult{
+				Type:    "text_outfit",
+				Name:    "outfit_description",
+				Message: outfitPrompt,
+			})
+		} else {
+			// Image outfit mode
+			outfitSourceName = strings.TrimSuffix(filepath.Base(outfitPath), filepath.Ext(outfitPath))
+			if len(outfitFiles) > 1 {
+				fmt.Printf("\n[Outfit %d/%d] Processing: %s\n", outfitIndex+1, len(outfitFiles), filepath.Base(outfitPath))
+			} else {
+				fmt.Printf("Analyzing outfit from: %s\n", filepath.Base(outfitPath))
+			}
+
+			// Analyze outfit from the source image
+			outfitData, err := o.AnalyzeImage("outfit", outfitPath)
+			if err != nil {
+				fmt.Printf("  Warning: Failed to analyze outfit %s: %v\n", filepath.Base(outfitPath), err)
+				continue
+			}
+
+			result.Steps = append(result.Steps, StepResult{
+				Type: "analysis",
+				Name: "outfit_source",
+				Data: outfitData,
+			})
+
+			// Extract outfit description and hair data
+			var outfit gemini.OutfitDescription
 		if err := json.Unmarshal(outfitData, &outfit); err != nil {
 			// Try to use the raw JSON as a string if possible
 			var rawText string
@@ -627,36 +684,36 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 				fmt.Printf("\n[DEBUG] Outfit prompt built from analysis:\n%s\n\n", outfitPrompt)
 			}
 
-			// Store hair data from outfit if available
-			if outfit.Hair != nil {
-				hairDataFromOutfit, _ = json.Marshal(outfit.Hair)
+				// Store hair data from outfit if available
+				if outfit.Hair != nil {
+					hairDataFromOutfit, _ = json.Marshal(outfit.Hair)
+				}
 			}
 		}
-	} else {
-		return nil, fmt.Errorf("no outfit source provided: either specify an outfit image path or use --outfit-text")
-	}
 
-	// Determine style source - use style-ref if provided, otherwise use the outfit source
-	styleSourcePath := options.StyleReference
-	if styleSourcePath == "" && outfitSourcePath != "" {
-		// Only use outfit source for style if we have an outfit image
-		styleSourcePath = outfitSourcePath
-		fmt.Printf("Using same image for style: %s\n", filepath.Base(outfitSourcePath))
-	} else if styleSourcePath != "" {
-		fmt.Printf("Using style from: %s\n", filepath.Base(styleSourcePath))
-	}
-
-	// Determine hair source and data
-	var hairData json.RawMessage
-	var hairSourceName string
-	if options.HairReference == "USE_OUTFIT_REF" {
-		// Use hair from outfit reference
-		hairData = hairDataFromOutfit
-		hairSourceName = strings.TrimSuffix(filepath.Base(outfitSourcePath), filepath.Ext(outfitSourcePath))
-		if hairData != nil {
-			fmt.Printf("Using hair from outfit reference: %s\n", filepath.Base(outfitSourcePath))
+		// Determine style source - use style-ref if provided, otherwise use the outfit source
+		styleSourcePath := options.StyleReference
+		if styleSourcePath == "" && outfitPath != "" {
+			// Only use outfit source for style if we have an outfit image
+			styleSourcePath = outfitPath
+			fmt.Printf("  Using same image for style: %s\n", filepath.Base(outfitPath))
+		} else if styleSourcePath != "" {
+			fmt.Printf("  Using style from: %s\n", filepath.Base(styleSourcePath))
 		}
-	} else if options.HairReference != "" {
+
+		// Determine hair source and data
+		var hairData json.RawMessage
+		var hairSourceName string
+		if options.HairReference == "USE_OUTFIT_REF" {
+			// Use hair from outfit reference
+			hairData = hairDataFromOutfit
+			if outfitPath != "" {
+				hairSourceName = strings.TrimSuffix(filepath.Base(outfitPath), filepath.Ext(outfitPath))
+			}
+			if hairData != nil {
+				fmt.Printf("  Using hair from outfit reference\n")
+			}
+		} else if options.HairReference != "" {
 		// Analyze hair from specified reference image
 		fmt.Printf("Analyzing hair from: %s\n", filepath.Base(options.HairReference))
 		hairAnalysisResult, err := o.AnalyzeImage("outfit", options.HairReference)
@@ -715,26 +772,6 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 		styleFiles = []string{""}
 	}
 
-	// The target must be specified - it's the subject to apply the outfit to
-	if options.TargetImage == "" {
-		return nil, fmt.Errorf("target subject must be specified for outfit-swap workflow")
-	}
-
-	targetImage := options.TargetImage
-	fmt.Printf("Applying to subject: %s\n", filepath.Base(targetImage))
-
-	// Extract outfit source name for filename
-	outfitSourceName := "text_outfit"
-	if outfitSourcePath != "" {
-		outfitSourceName = strings.TrimSuffix(filepath.Base(outfitSourcePath), filepath.Ext(outfitSourcePath))
-	}
-
-	// Determine number of variations to generate per style
-	variations := options.Variations
-	if variations < 1 {
-		variations = 1
-	}
-
 	// Loop through all style files
 	for styleIndex, stylePath := range styleFiles {
 		var styleData json.RawMessage
@@ -742,7 +779,9 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 
 		// Analyze style if we have a style file
 		if stylePath != "" {
-			fmt.Printf("  [%d/%d] Processing style: %s\n", styleIndex+1, len(styleFiles), filepath.Base(stylePath))
+			if len(styleFiles) > 1 {
+				fmt.Printf("    [Style %d/%d] Processing: %s\n", styleIndex+1, len(styleFiles), filepath.Base(stylePath))
+			}
 
 			var err error
 			styleData, err = o.AnalyzeImage("visual_style", stylePath)
@@ -760,17 +799,19 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 			})
 		}
 
-		// Generate the specified number of variations for this style
+		// Generate the specified number of variations for this combination
 		for v := 1; v <= variations; v++ {
 			if variations > 1 {
-				fmt.Printf("    Generating variation %d of %d...\n", v, variations)
+				fmt.Printf("      Generating variation %d of %d...\n", v, variations)
+			} else {
+				fmt.Printf("      Generating image...\n")
 			}
 
 			// Pass outfit reference image if SendOriginal is true and we have an image
 			outfitRef := ""
 			promptToUse := outfitPrompt
-			if options.SendOriginal && outfitSourcePath != "" {
-				outfitRef = outfitSourcePath
+			if options.SendOriginal && outfitPath != "" {
+				outfitRef = outfitPath
 				// When using --send-original, use minimal prompt to let the image speak for itself
 				promptToUse = ""
 			}
@@ -799,15 +840,16 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 				Type:       "generation",
 				Name:       "combined",
 				OutputPath: combinedResult.OutputPath,
-				Message:    fmt.Sprintf("Generated %s with %s style", filepath.Base(targetImage), styleSourceName),
+				Message:    fmt.Sprintf("Generated with %s outfit and %s style", outfitSourceName, styleSourceName),
 			})
 
 			// Brief pause between generations
-			if v < variations || styleIndex < len(styleFiles)-1 {
+			if v < variations || styleIndex < len(styleFiles)-1 || outfitIndex < len(outfitFiles)-1 {
 				time.Sleep(1 * time.Second)
 			}
 		}
 	}
+	} // End of outfit loop
 
 	result.EndTime = time.Now()
 	return result, nil
