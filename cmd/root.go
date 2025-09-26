@@ -22,12 +22,23 @@ var (
 // rootCmd represents the base command
 var rootCmd = &cobra.Command{
 	Use:   "img-cli",
-	Short: "Image generation CLI using Gemini API",
-	Long: `A sophisticated image generation application that uses Google's Gemini API
-to transform portraits with different outfits and styles.
+	Short: "Apply outfits and styles to portrait images",
+	Long: `Apply outfit and style transformations to portrait images using Gemini API.
 
-This CLI provides commands for analyzing images, generating transformations,
-and running complex workflows for image processing.`,
+Primary Command:
+  outfit-swap - Apply an outfit to one or more test subjects with optional style
+
+Examples:
+  # Use all defaults (shearling-black outfit, plain-white style, jaimee subject)
+  img-cli outfit-swap
+
+  # Specify outfit with custom style and subjects
+  img-cli outfit-swap ./outfits/suit.png -s ./styles/night.png -t "jaimee kat"
+
+Additional Commands:
+  analyze - Analyze images for outfit, visual style, or art style
+  generate - Generate images with specific transformations
+  cache - Manage analysis cache`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Set up logging
 		level := logger.ParseLevel(logLevel)

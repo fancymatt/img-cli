@@ -26,7 +26,14 @@
       "Bash(find:*)",
       "Bash(./test-cache.exe cache stats)",
       "Bash(echo:*)",
-      "Bash(./img-cli.exe:*)"
+      "Bash(./img-cli.exe:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(python:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(git rm:*)",
+      "Bash(del nul)"
     ],
     "deny": [],
     "ask": []

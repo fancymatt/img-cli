@@ -1,6 +1,6 @@
-// Package workflow provides orchestration for complex image processing workflows.
-// It coordinates between analyzers, generators, and caching to execute multi-step
-// image transformation pipelines.
+// Package workflow provides orchestration for the outfit-swap workflow.
+// It coordinates between analyzers, generators, and caching to execute
+// the image transformation pipeline.
 package workflow
 
 import (
@@ -11,6 +11,7 @@ import (
 	"img-cli/pkg/cache"
 	"img-cli/pkg/generator"
 	"img-cli/pkg/gemini"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -48,444 +49,139 @@ func NewOrchestrator(apiKey string) *Orchestrator {
 	o.generators["style_transfer"] = generator.NewStyleTransferGenerator(client)
 	o.generators["combined"] = generator.NewCombinedGenerator(client)
 	o.generators["style_guide"] = generator.NewStyleGuideGenerator(client)
-	o.generators["art_style"] = generator.NewArtStyleGenerator(client)
 
 	return o
 }
 
+// SetCacheEnabled enables or disables caching
 func (o *Orchestrator) SetCacheEnabled(enabled bool) {
 	o.enableCache = enabled
 }
 
-func (o *Orchestrator) GetCache() *cache.Cache {
-	// Return the outfit cache by default for backward compatibility
-	return o.caches["outfit"]
+// GetCacheForType returns the cache for a specific analyzer type
+func (o *Orchestrator) GetCacheForType(analyzerType string) *cache.Cache {
+	return o.caches[analyzerType]
 }
 
-func (o *Orchestrator) GetCacheForType(cacheType string) *cache.Cache {
-	if c, exists := o.caches[cacheType]; exists {
-		return c
-	}
-	// Return outfit cache as default
-	return o.caches["outfit"]
-}
-
-func (o *Orchestrator) GetAnalyzerTypes() []string {
-	types := make([]string, 0, len(o.analyzers))
-	for typ := range o.analyzers {
-		types = append(types, typ)
-	}
-	return types
-}
-
+// AnalyzeAll analyzes an image with all available analyzers
 func (o *Orchestrator) AnalyzeAll(imagePath string) (map[string]json.RawMessage, error) {
 	results := make(map[string]json.RawMessage)
 
-	for typ := range o.analyzers {
-		result, err := o.AnalyzeImage(typ, imagePath)
+	for analyzerType := range o.analyzers {
+		result, err := o.AnalyzeImage(analyzerType, imagePath)
 		if err != nil {
-			fmt.Printf("  Warning: Failed to analyze %s: %v\n", typ, err)
-			continue
+			return nil, fmt.Errorf("failed to analyze %s: %w", analyzerType, err)
 		}
-		results[typ] = result
-	}
-
-	if len(results) == 0 {
-		return nil, fmt.Errorf("all analyses failed")
+		results[analyzerType] = result
 	}
 
 	return results, nil
 }
 
-func (o *Orchestrator) AnalyzeImage(analyzerType, imagePath string) (json.RawMessage, error) {
-	a, exists := o.analyzers[analyzerType]
-	if !exists {
-		return nil, fmt.Errorf("analyzer type '%s' not found", analyzerType)
+// AnalyzeImage analyzes an image using the specified analyzer
+func (o *Orchestrator) AnalyzeImage(analyzerType string, imagePath string) (json.RawMessage, error) {
+	analyzer, ok := o.analyzers[analyzerType]
+	if !ok {
+		return nil, fmt.Errorf("analyzer not found: %s", analyzerType)
 	}
 
-	// Check cache first - use the appropriate cache for the type
-	if o.enableCache {
-		cache := o.GetCacheForType(analyzerType)
-		if cachedData, found := cache.Get(analyzerType, imagePath); found {
-			fmt.Printf("  [Using cached %s analysis]\n", analyzerType)
-			return cachedData, nil
+	// Get the appropriate cache for this analyzer type
+	c := o.caches[analyzerType]
+	if c == nil || !o.enableCache {
+		// No cache configured or caching disabled
+		return analyzer.Analyze(imagePath)
+	}
+
+	// Try to get from cache
+	fileInfo, _ := os.Stat(imagePath)
+	cached, found := c.Get(filepath.Base(imagePath), imagePath)
+	if found {
+		// Parse the cached data to extract the analysis
+		var cacheEntry struct {
+			Timestamp   time.Time       `json:"timestamp"`
+			Description string          `json:"description"`
+			Analysis    json.RawMessage `json:"analysis"`
+		}
+		if err := json.Unmarshal(cached, &cacheEntry); err == nil {
+			if cacheEntry.Analysis != nil {
+				return cacheEntry.Analysis, nil
+			}
 		}
 	}
 
-	// Perform analysis
-	result, err := a.Analyze(imagePath)
+	// Not in cache or error reading cache, perform analysis
+	result, err := analyzer.Analyze(imagePath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Store in cache - use the appropriate cache for the type
-	if o.enableCache {
-		cache := o.GetCacheForType(analyzerType)
-		if err := cache.Set(analyzerType, imagePath, result); err != nil {
-			// Log but don't fail on cache errors
-			fmt.Printf("  [Warning: Failed to cache result: %v]\n", err)
-		}
+	// Store in cache with the appropriate structure
+	cacheEntry := struct {
+		Timestamp   time.Time       `json:"timestamp"`
+		Description string          `json:"description"`
+		Analysis    json.RawMessage `json:"analysis"`
+	}{
+		Analysis:    result,
+		Timestamp:   time.Now(),
+		Description: extractDescriptionFromAnalysis(analyzerType, result),
+	}
+
+	cacheData, err := json.Marshal(cacheEntry)
+	if err == nil && fileInfo != nil {
+		c.Set(filepath.Base(imagePath), imagePath, cacheData)
 	}
 
 	return result, nil
 }
 
-func (o *Orchestrator) GenerateImage(generatorType string, params generator.GenerateParams) (*generator.GenerateResult, error) {
-	g, exists := o.generators[generatorType]
-	if !exists {
-		return nil, fmt.Errorf("generator type '%s' not found", generatorType)
-	}
-
-	return g.Generate(params)
-}
-
-func (o *Orchestrator) RunWorkflow(workflow string, imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	switch workflow {
-	case "outfit-variations":
-		return o.runOutfitVariationsWorkflow(imagePath, options)
-	case "style-transfer":
-		return o.runStyleTransferWorkflow(imagePath, options)
-	case "complete-transformation":
-		return o.runCompleteTransformationWorkflow(imagePath, options)
-	case "cross-reference":
-		return o.runCrossReferenceWorkflow(imagePath, options)
-	case "outfit-swap":
-		return o.runOutfitSwapWorkflow(imagePath, options)
-	case "use-art-style":
-		return o.runUseArtStyleWorkflow(imagePath, options)
-	case "analyze-style":
-		return o.runAnalyzeStyleWorkflow(imagePath, options)
-	case "create-style-guide":
-		return o.runCreateStyleGuideWorkflow(imagePath, options)
-	default:
-		return nil, fmt.Errorf("unknown workflow: %s", workflow)
-	}
-}
-
-func (o *Orchestrator) runOutfitVariationsWorkflow(imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	result := &WorkflowResult{
-		Workflow:  "outfit-variations",
-		StartTime: time.Now(),
-		Steps:     []StepResult{},
-	}
-
-	outfitData, err := o.AnalyzeImage("outfit", imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to analyze outfit: %w", err)
-	}
-
-	result.Steps = append(result.Steps, StepResult{
-		Type: "analysis",
-		Name: "outfit",
-		Data: outfitData,
-	})
-
-	outfits := options.Outfits
-	if len(outfits) == 0 {
-		outfits = []string{"business suit", "casual streetwear", "formal evening wear"}
-	}
-
-	for _, outfit := range outfits {
-		genResult, err := o.GenerateImage("outfit", generator.GenerateParams{
-			ImagePath: imagePath,
-			Prompt:    outfit,
-			OutputDir: options.OutputDir,
-		})
-		if err != nil {
-			fmt.Printf("Warning: failed to generate %s: %v\n", outfit, err)
-			continue
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type:       "generation",
-			Name:       "outfit",
-			OutputPath: genResult.OutputPath,
-			Message:    genResult.Message,
-		})
-
-		time.Sleep(2 * time.Second)
-	}
-
-	result.EndTime = time.Now()
-	return result, nil
-}
-
-func (o *Orchestrator) runStyleTransferWorkflow(imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	result := &WorkflowResult{
-		Workflow:  "style-transfer",
-		StartTime: time.Now(),
-		Steps:     []StepResult{},
-	}
-
-	var styleData json.RawMessage
-	if options.StyleReference != "" {
-		var err error
-		styleData, err = o.AnalyzeImage("visual_style", options.StyleReference)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze style reference: %w", err)
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "visual_style",
-			Data: styleData,
-		})
-	}
-
-	genResult, err := o.GenerateImage("style_transfer", generator.GenerateParams{
-		ImagePath: imagePath,
-		Prompt:    options.StylePrompt,
-		StyleData: styleData,
-		OutputDir: options.OutputDir,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate styled image: %w", err)
-	}
-
-	result.Steps = append(result.Steps, StepResult{
-		Type:       "generation",
-		Name:       "style_transfer",
-		OutputPath: genResult.OutputPath,
-		Message:    genResult.Message,
-	})
-
-	result.EndTime = time.Now()
-	return result, nil
-}
-
-func (o *Orchestrator) runCompleteTransformationWorkflow(imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	result := &WorkflowResult{
-		Workflow:  "complete-transformation",
-		StartTime: time.Now(),
-		Steps:     []StepResult{},
-	}
-
-	outfitData, err := o.AnalyzeImage("outfit", imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to analyze outfit: %w", err)
-	}
-	result.Steps = append(result.Steps, StepResult{
-		Type: "analysis",
-		Name: "outfit",
-		Data: outfitData,
-	})
-
-	styleData, err := o.AnalyzeImage("visual_style", imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to analyze visual style: %w", err)
-	}
-	result.Steps = append(result.Steps, StepResult{
-		Type: "analysis",
-		Name: "visual_style",
-		Data: styleData,
-	})
-
-	if options.NewOutfit != "" {
-		genResult, err := o.GenerateImage("outfit", generator.GenerateParams{
-			ImagePath: imagePath,
-			Prompt:    options.NewOutfit,
-			OutputDir: options.OutputDir,
-		})
-		if err == nil {
-			result.Steps = append(result.Steps, StepResult{
-				Type:       "generation",
-				Name:       "outfit",
-				OutputPath: genResult.OutputPath,
-				Message:    genResult.Message,
-			})
-
-			time.Sleep(2 * time.Second)
-
-			styledResult, err := o.GenerateImage("style_transfer", generator.GenerateParams{
-				ImagePath: genResult.OutputPath,
-				StyleData: styleData,
-				OutputDir: options.OutputDir,
-			})
-			if err == nil {
-				result.Steps = append(result.Steps, StepResult{
-					Type:       "generation",
-					Name:       "style_transfer",
-					OutputPath: styledResult.OutputPath,
-					Message:    "Applied original style to new outfit",
-				})
-			}
-		}
-	}
-
-	result.EndTime = time.Now()
-	return result, nil
-}
-
-func (o *Orchestrator) runCrossReferenceWorkflow(imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	result := &WorkflowResult{
-		Workflow:  "cross-reference",
-		StartTime: time.Now(),
-		Steps:     []StepResult{},
-	}
-
-	// Get outfit from outfit reference image (or use provided description)
-	var outfitPrompt string
-	var hairDataFromOutfit json.RawMessage
-	if options.OutfitReference != "" {
-		outfitData, err := o.AnalyzeImage("outfit", options.OutfitReference)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze outfit reference: %w", err)
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "outfit_reference",
-			Data: outfitData,
-		})
-
-		// Extract outfit description from analysis
+// Helper function to extract description from analysis result
+func extractDescriptionFromAnalysis(analyzerType string, analysis json.RawMessage) string {
+	switch analyzerType {
+	case "outfit":
 		var outfit gemini.OutfitDescription
-		if err := json.Unmarshal(outfitData, &outfit); err == nil {
-			// Build comprehensive prompt with ALL details
-			var promptBuilder strings.Builder
-			promptBuilder.WriteString("wearing exactly: ")
-
-			// Include ALL clothing items with full details
-			if len(outfit.Clothing) > 0 {
-				for i, item := range outfit.Clothing {
-					if i > 0 {
-						promptBuilder.WriteString("; ")
-					}
-
-					// Handle both string and ClothingItem object formats
-					switch v := item.(type) {
-					case string:
-						promptBuilder.WriteString(v)
-					case map[string]interface{}:
-						// This is a ClothingItem object
-						if desc, ok := v["description"].(string); ok {
-							promptBuilder.WriteString(desc)
-						} else if itemName, ok := v["item"].(string); ok {
-							promptBuilder.WriteString(itemName)
-						}
-						// Add specific color requirements if present
-						if mainColor, ok := v["main_body_color"].(string); ok && mainColor != "" && mainColor != "none" {
-							promptBuilder.WriteString(fmt.Sprintf(" with %s main body", mainColor))
-						}
-						if collarColor, ok := v["collar_color"].(string); ok && collarColor != "" && collarColor != "none" {
-							promptBuilder.WriteString(fmt.Sprintf(", %s collar", collarColor))
-						}
+		if err := json.Unmarshal(analysis, &outfit); err == nil {
+			// Build a comprehensive description
+			var parts []string
+			// Handle clothing items
+			for _, item := range outfit.Clothing {
+				if str, ok := item.(string); ok {
+					parts = append(parts, str)
+				} else if clothingItem, ok := item.(map[string]interface{}); ok {
+					if itemName, exists := clothingItem["item"].(string); exists {
+						parts = append(parts, itemName)
 					}
 				}
 			}
-
-			// Add color specifications
-			if len(outfit.Colors) > 0 {
-				promptBuilder.WriteString(". CRITICAL COLOR REQUIREMENTS: ")
-				promptBuilder.WriteString(strings.Join(outfit.Colors, ", "))
+			if outfit.Style != "" {
+				parts = append(parts, fmt.Sprintf("Style: %s", outfit.Style))
 			}
-
-			// Add accessories if present
-			if len(outfit.Accessories) > 0 {
-				promptBuilder.WriteString(". Accessories: ")
-				for i, acc := range outfit.Accessories {
-					if i > 0 {
-						promptBuilder.WriteString(", ")
-					}
-					// Handle both string and object formats
-					switch v := acc.(type) {
-					case string:
-						promptBuilder.WriteString(v)
-					case map[string]interface{}:
-						if desc, ok := v["description"].(string); ok {
-							promptBuilder.WriteString(desc)
-						} else if itemName, ok := v["item"].(string); ok {
-							promptBuilder.WriteString(itemName)
-						}
-					}
-				}
-			}
-
-			// Add the overall description for context
-			if outfit.Overall != "" {
-				promptBuilder.WriteString(". Overall styling: ")
-				promptBuilder.WriteString(outfit.Overall)
-			}
-
-			outfitPrompt = promptBuilder.String()
-
-			// Store hair data from outfit if available
-			if outfit.Hair != nil {
-				hairDataFromOutfit, _ = json.Marshal(outfit.Hair)
-			}
+			return strings.Join(parts, ", ")
 		}
-	} else if options.NewOutfit != "" {
-		outfitPrompt = options.NewOutfit
-	} else {
-		return nil, fmt.Errorf("either --outfit-ref or --outfit must be provided")
+	case "visual_style":
+		var style gemini.VisualStyle
+		if err := json.Unmarshal(analysis, &style); err == nil {
+			return style.Composition
+		}
+	}
+	return ""
+}
+
+// GenerateImage generates an image using the specified generator
+func (o *Orchestrator) GenerateImage(generatorType string, params generator.GenerateParams) (*generator.GenerateResult, error) {
+	gen, ok := o.generators[generatorType]
+	if !ok {
+		return nil, fmt.Errorf("generator not found: %s", generatorType)
 	}
 
-	// Get style from style reference image
-	var styleData json.RawMessage
-	if options.StyleReference != "" {
-		var err error
-		styleData, err = o.AnalyzeImage("visual_style", options.StyleReference)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze style reference: %w", err)
-		}
+	return gen.Generate(params)
+}
 
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "style_reference",
-			Data: styleData,
-		})
+// RunWorkflow runs the outfit-swap workflow
+func (o *Orchestrator) RunWorkflow(workflow string, imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
+	if workflow != "outfit-swap" {
+		return nil, fmt.Errorf("unsupported workflow: %s (only 'outfit-swap' is supported)", workflow)
 	}
-
-	// Handle hair reference
-	var hairData json.RawMessage
-	if options.HairReference == "USE_OUTFIT_REF" {
-		// Use hair from outfit reference
-		hairData = hairDataFromOutfit
-		if hairData != nil {
-			fmt.Printf("Using hair from outfit reference\n")
-		}
-	} else if options.HairReference != "" {
-		// Analyze hair from specified reference image
-		fmt.Printf("Analyzing hair from: %s\n", filepath.Base(options.HairReference))
-		hairAnalysisResult, err := o.AnalyzeImage("outfit", options.HairReference)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze hair from %s: %w", filepath.Base(options.HairReference), err)
-		}
-
-		// Extract hair data from the analysis
-		var hairOutfit gemini.OutfitDescription
-		if err := json.Unmarshal(hairAnalysisResult, &hairOutfit); err == nil && hairOutfit.Hair != nil {
-			hairData, _ = json.Marshal(hairOutfit.Hair)
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "hair_reference",
-			Data: hairAnalysisResult,
-		})
-	}
-
-	// Use combined generator to apply outfit, style, and hair all at once
-	combinedResult, err := o.GenerateImage("combined", generator.GenerateParams{
-		ImagePath: imagePath,
-		Prompt:    outfitPrompt,
-		StyleData: styleData,
-		HairData:  hairData,
-		OutputDir: options.OutputDir,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate cross-referenced image: %w", err)
-	}
-
-	result.Steps = append(result.Steps, StepResult{
-		Type:       "generation",
-		Name:       "combined",
-		OutputPath: combinedResult.OutputPath,
-		Message:    fmt.Sprintf("Generated with outfit, style, and hair references applied"),
-	})
-
-	result.EndTime = time.Now()
-	return result, nil
+	return o.runOutfitSwapWorkflow(imagePath, options)
 }
 
 func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options WorkflowOptions) (*WorkflowResult, error) {
@@ -650,7 +346,11 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 		if err != nil {
 			fmt.Printf("    Warning: Failed to analyze hair from %s: %v\n", filepath.Base(options.HairReference), err)
 		} else {
-			hairData = extractHairFromAnalysis(hairAnalysisResult)
+			// Extract hair from analysis
+			var outfit gemini.OutfitDescription
+			if err := json.Unmarshal(hairAnalysisResult, &outfit); err == nil && outfit.Hair != nil {
+				hairData, _ = json.Marshal(outfit.Hair)
+			}
 			if hairData != nil {
 				hairSourceName = strings.TrimSuffix(filepath.Base(options.HairReference), filepath.Ext(options.HairReference))
 				fmt.Printf("    Successfully extracted hair data\n")
@@ -764,233 +464,28 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 	return result, nil
 }
 
-func (o *Orchestrator) runUseArtStyleWorkflow(imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	result := &WorkflowResult{
-		Workflow:  "use-art-style",
-		StartTime: time.Now(),
-		Steps:     []StepResult{},
+
+// formatDescription formats a description with a label
+func formatDescription(label, description string) string {
+	if description == "" {
+		return ""
 	}
 
-	// Check if style reference is provided
-	if options.StyleReference == "" {
-		return nil, fmt.Errorf("style reference image required (--style-ref)")
+	// For descriptions that already form complete sentences,
+	// just add the label as a prefix
+	if strings.Contains(description, ".") {
+		return fmt.Sprintf("%s: %s", label, description)
 	}
 
-	// Analyze the style reference if it's not a JSON file
-	var styleAnalysis json.RawMessage
-	if strings.HasSuffix(options.StyleReference, ".json") {
-		// Load existing style analysis
-		data, err := gemini.LoadFile(options.StyleReference)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load style analysis: %w", err)
-		}
-		styleAnalysis = json.RawMessage(data)
-	} else {
-		// Analyze the style reference image
-		var err error
-		styleAnalysis, err = o.AnalyzeImage("art_style", options.StyleReference)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze style reference: %w", err)
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "art_style",
-		})
-	}
-
-	// Generate styled image
-	params := generator.GenerateParams{
-		ImagePath:      imagePath,
-		Prompt:         options.Prompt,
-		StyleReference: options.StyleReference,
-		StyleAnalysis:  styleAnalysis,
-		OutputDir:      options.OutputDir,
-	}
-
-	genResult, err := o.GenerateImage("art_style", params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate styled image: %w", err)
-	}
-
-	result.Steps = append(result.Steps, StepResult{
-		Type:       "generation",
-		Name:       "art_style",
-		OutputPath: genResult.OutputPath,
-	})
-
-	result.EndTime = time.Now()
-	return result, nil
+	// For shorter descriptions, create a complete sentence
+	return fmt.Sprintf("%s: %s.", label, description)
 }
 
-func (o *Orchestrator) runAnalyzeStyleWorkflow(imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	result := &WorkflowResult{
-		Workflow:  "analyze-style",
-		StartTime: time.Now(),
-		Steps:     []StepResult{},
-	}
-
-	// Check if it's a directory for batch analysis
-	fileInfo, err := gemini.GetFileInfo(imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to access path: %w", err)
-	}
-
-	var analysisResult json.RawMessage
-
-	if fileInfo.IsDir() {
-		// Batch analyze all images in directory
-		images, err := gemini.GetImagesFromDirectory(imagePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read directory: %w", err)
-		}
-
-		if len(images) == 0 {
-			return nil, fmt.Errorf("no images found in directory")
-		}
-
-		// Use the multi-image analyzer
-		if artAnalyzer, ok := o.analyzers["art_style"].(*analyzer.ArtStyleAnalyzer); ok {
-			analysisResult, err = artAnalyzer.AnalyzeMultiple(images)
-			if err != nil {
-				return nil, fmt.Errorf("failed to analyze images: %w", err)
-			}
-		} else {
-			// Fallback to single analysis of first image
-			analysisResult, err = o.AnalyzeImage("art_style", images[0])
-			if err != nil {
-				return nil, fmt.Errorf("failed to analyze style: %w", err)
-			}
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: fmt.Sprintf("art_style (batch: %d images)", len(images)),
-		})
-	} else {
-		// Single image analysis
-		analysisResult, err = o.AnalyzeImage("art_style", imagePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze style: %w", err)
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "art_style",
-		})
-	}
-
-	// Print the analysis
-	fmt.Println("\n=== Art Style Analysis ===")
-	var prettyJSON bytes.Buffer
-	if err := json.Indent(&prettyJSON, analysisResult, "", "  "); err != nil {
-		fmt.Println(string(analysisResult))
-	} else {
-		fmt.Println(prettyJSON.String())
-	}
-
-	// Save analysis to file if output dir specified
-	if options.OutputDir != "" {
-		outputPath := filepath.Join(options.OutputDir, "style_analysis.json")
-		if err := gemini.SaveFile(outputPath, analysisResult); err != nil {
-			fmt.Printf("Warning: Could not save analysis: %v\n", err)
-		} else {
-			fmt.Printf("\nAnalysis saved to: %s\n", outputPath)
-		}
-	}
-
-	result.EndTime = time.Now()
-	return result, nil
+// Buffer wraps bytes.Buffer to make it implement io.Writer
+type Buffer struct {
+	*bytes.Buffer
 }
 
-func (o *Orchestrator) runCreateStyleGuideWorkflow(imagePath string, options WorkflowOptions) (*WorkflowResult, error) {
-	result := &WorkflowResult{
-		Workflow:  "create-style-guide",
-		StartTime: time.Now(),
-		Steps:     []StepResult{},
-	}
-
-	// First analyze the style(s)
-	var styleAnalysis json.RawMessage
-	var err error
-
-	// Check if it's a directory for batch analysis
-	fileInfo, err := gemini.GetFileInfo(imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to access path: %w", err)
-	}
-
-	if fileInfo.IsDir() {
-		// Batch analyze all images in directory
-		images, err := gemini.GetImagesFromDirectory(imagePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read directory: %w", err)
-		}
-
-		if len(images) == 0 {
-			return nil, fmt.Errorf("no images found in directory")
-		}
-
-		// Use the multi-image analyzer
-		if artAnalyzer, ok := o.analyzers["art_style"].(*analyzer.ArtStyleAnalyzer); ok {
-			styleAnalysis, err = artAnalyzer.AnalyzeMultiple(images)
-			if err != nil {
-				return nil, fmt.Errorf("failed to analyze images: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("art style analyzer not available")
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: fmt.Sprintf("art_style (batch: %d images)", len(images)),
-		})
-	} else {
-		// Single image analysis
-		styleAnalysis, err = o.AnalyzeImage("art_style", imagePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze style: %w", err)
-		}
-
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "art_style",
-		})
-	}
-
-	// Generate style guide
-	params := generator.GenerateParams{
-		StyleAnalysis: styleAnalysis,
-		OutputDir:     "styles", // Always save to styles directory
-	}
-
-	// Override with custom name if provided in prompt
-	if options.Prompt != "" {
-		params.OutputDir = filepath.Join("styles", options.Prompt)
-	}
-
-	genResult, err := o.GenerateImage("style_guide", params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate style guide: %w", err)
-	}
-
-	result.Steps = append(result.Steps, StepResult{
-		Type:       "generation",
-		Name:       "style_guide",
-		OutputPath: genResult.OutputPath,
-	})
-
-	fmt.Printf("\n=== Style Guide Created ===\n")
-	fmt.Printf("Style guide saved to: %s\n", genResult.OutputPath)
-	fmt.Printf("You can now use this style with: --style-ref %s\n", genResult.OutputPath)
-
-	result.EndTime = time.Now()
-	return result, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+func (b *Buffer) Close() error {
+	return nil
 }
