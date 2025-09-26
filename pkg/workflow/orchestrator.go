@@ -517,34 +517,19 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 		variations = 1
 	}
 
-	// Collect outfit files - either single file or all files from directory
+	// Collect outfit files
 	var outfitFiles []string
-
 	if outfitSourcePath == "" && options.OutfitText != "" {
-		// Text-based outfit description
 		outfitFiles = []string{""} // Empty string signals text mode
 		fmt.Printf("Using text outfit description\n")
 	} else if outfitSourcePath != "" {
-		// Check if outfit source is a directory
-		fileInfo, err := gemini.GetFileInfo(outfitSourcePath)
+		var err error
+		outfitFiles, err = collectImageFiles(outfitSourcePath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to access outfit path %s: %w", outfitSourcePath, err)
+			return nil, err
 		}
-
-		if fileInfo.IsDir() {
-			// Get all images from the directory
-			images, err := gemini.GetImagesFromDirectory(outfitSourcePath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read outfit directory %s: %w", outfitSourcePath, err)
-			}
-			if len(images) == 0 {
-				return nil, fmt.Errorf("no image files found in outfit directory %s", outfitSourcePath)
-			}
-			outfitFiles = images
+		if len(outfitFiles) > 1 {
 			fmt.Printf("Found %d outfit images in directory\n", len(outfitFiles))
-		} else {
-			// Single outfit file
-			outfitFiles = []string{outfitSourcePath}
 		}
 	} else {
 		return nil, fmt.Errorf("no outfit source provided: either specify an outfit image path or use --outfit-text")
@@ -599,110 +584,11 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 			})
 
 			// Extract outfit description and hair data
-			var outfit gemini.OutfitDescription
-		if err := json.Unmarshal(outfitData, &outfit); err != nil {
-			// Try to use the raw JSON as a string if possible
-			var rawText string
-			if json.Unmarshal(outfitData, &rawText) == nil && rawText != "" {
-				// The data might be a plain string response
-				outfitPrompt = rawText
-			} else {
-				// Final fallback - this will still work for generation
-				outfitPrompt = "wearing the same outfit as shown in the reference image"
-			}
-		} else {
-			// Successfully parsed outfit structure - build comprehensive prompt
-			var promptBuilder strings.Builder
-			promptBuilder.WriteString("wearing exactly: ")
-
-		// Include ALL clothing items with full details
-		if len(outfit.Clothing) > 0 {
-			for i, item := range outfit.Clothing {
-				if i > 0 {
-					promptBuilder.WriteString("; ")
-				}
-
-				// Handle both string and ClothingItem object formats
-				switch v := item.(type) {
-				case string:
-					promptBuilder.WriteString(v)
-				case map[string]interface{}:
-					// This is a ClothingItem object
-					if desc, ok := v["description"].(string); ok {
-						promptBuilder.WriteString(desc)
-					} else if itemName, ok := v["item"].(string); ok {
-						// Fallback to item name if description missing
-						promptBuilder.WriteString(itemName)
-					}
-					// Add specific color requirements
-					if mainColor, ok := v["main_body_color"].(string); ok && mainColor != "" && mainColor != "none" {
-						promptBuilder.WriteString(fmt.Sprintf(" with %s main body", mainColor))
-					}
-					if collarColor, ok := v["collar_color"].(string); ok && collarColor != "" && collarColor != "none" {
-						promptBuilder.WriteString(fmt.Sprintf(", %s collar", collarColor))
-					}
-					if trimColor, ok := v["trim_color"].(string); ok && trimColor != "" && trimColor != "none" {
-						promptBuilder.WriteString(fmt.Sprintf(", %s trim", trimColor))
-					}
-				}
-			}
-		}
-
-		// Add color specifications
-		if len(outfit.Colors) > 0 {
-			promptBuilder.WriteString(". CRITICAL COLOR REQUIREMENTS: ")
-			promptBuilder.WriteString(strings.Join(outfit.Colors, ", "))
-		}
-
-		// Add accessories if present
-		if len(outfit.Accessories) > 0 {
-			promptBuilder.WriteString(". Accessories: ")
-			for i, acc := range outfit.Accessories {
-				if i > 0 {
-					promptBuilder.WriteString(", ")
-				}
-				// Handle both string and object formats
-				switch v := acc.(type) {
-				case string:
-					promptBuilder.WriteString(v)
-				case map[string]interface{}:
-					if desc, ok := v["description"].(string); ok {
-						promptBuilder.WriteString(desc)
-					} else if itemName, ok := v["item"].(string); ok {
-						promptBuilder.WriteString(itemName)
-					}
-				}
-			}
-		}
-
-		// Add the overall description for context
-		if outfit.Overall != "" {
-			promptBuilder.WriteString(". Overall styling: ")
-			promptBuilder.WriteString(outfit.Overall)
-		}
-
-			// Add style notes
-			if outfit.Style != "" {
-				promptBuilder.WriteString(". Style notes: ")
-				promptBuilder.WriteString(outfit.Style)
-			}
-
-			outfitPrompt = promptBuilder.String()
-
-			// If still empty somehow, use a fallback
-			if outfitPrompt == "wearing exactly: " {
-				outfitPrompt = "wearing the same outfit as shown in the reference image"
-			}
+			outfitPrompt, hairDataFromOutfit = extractOutfitPromptAndHair(outfitData)
 
 			// Debug output
 			if options.DebugPrompt {
 				fmt.Printf("\n[DEBUG] Outfit prompt built from analysis:\n%s\n\n", outfitPrompt)
-			}
-
-				// Store hair data from outfit if available
-				if outfit.Hair != nil {
-					hairDataFromOutfit, _ = json.Marshal(outfit.Hair)
-				}
 			}
 		}
 
@@ -730,61 +616,35 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 			}
 		} else if options.HairReference != "" {
 		// Analyze hair from specified reference image
-		fmt.Printf("Analyzing hair from: %s\n", filepath.Base(options.HairReference))
+		fmt.Printf("  Analyzing hair from: %s\n", filepath.Base(options.HairReference))
 		hairAnalysisResult, err := o.AnalyzeImage("outfit", options.HairReference)
 		if err != nil {
-			return nil, fmt.Errorf("failed to analyze hair from %s: %w", filepath.Base(options.HairReference), err)
-		}
-
-		// Extract hair data from the analysis
-		var hairOutfit gemini.OutfitDescription
-		if err := json.Unmarshal(hairAnalysisResult, &hairOutfit); err == nil {
-			if hairOutfit.Hair != nil {
-				hairData, _ = json.Marshal(hairOutfit.Hair)
-				hairSourceName = strings.TrimSuffix(filepath.Base(options.HairReference), filepath.Ext(options.HairReference))
-				fmt.Printf("  Successfully extracted hair data from %s\n", filepath.Base(options.HairReference))
-			} else {
-				fmt.Printf("  WARNING: No hair data found in analysis of %s\n", filepath.Base(options.HairReference))
-			}
+			fmt.Printf("    Warning: Failed to analyze hair from %s: %v\n", filepath.Base(options.HairReference), err)
 		} else {
-			fmt.Printf("  WARNING: Failed to parse hair analysis from %s: %v\n", filepath.Base(options.HairReference), err)
-		}
+			hairData = extractHairFromAnalysis(hairAnalysisResult)
+			if hairData != nil {
+				hairSourceName = strings.TrimSuffix(filepath.Base(options.HairReference), filepath.Ext(options.HairReference))
+				fmt.Printf("    Successfully extracted hair data\n")
+			} else {
+				fmt.Printf("    Warning: No hair data found in analysis\n")
+			}
 
-		result.Steps = append(result.Steps, StepResult{
-			Type: "analysis",
-			Name: "hair_source",
-			Data: hairAnalysisResult,
-		})
+			result.Steps = append(result.Steps, StepResult{
+				Type: "analysis",
+				Name: "hair_source",
+				Data: hairAnalysisResult,
+			})
+		}
 	}
 	// If no hair reference specified, hairData remains nil and original hair will be preserved
 
-	// Collect style sources - either single file or all files from directory
-	var styleFiles []string
-	if styleSourcePath != "" {
-		// Check if style source is a directory
-		fileInfo, err := gemini.GetFileInfo(styleSourcePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to access style path %s: %w", styleSourcePath, err)
-		}
-
-		if fileInfo.IsDir() {
-			// Get all images from the directory
-			images, err := gemini.GetImagesFromDirectory(styleSourcePath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read style directory %s: %w", styleSourcePath, err)
-			}
-			if len(images) == 0 {
-				return nil, fmt.Errorf("no image files found in style directory %s", styleSourcePath)
-			}
-			styleFiles = images
-			fmt.Printf("  Found %d style images in directory\n", len(styleFiles))
-		} else {
-			// Single style file
-			styleFiles = []string{styleSourcePath}
-		}
-	} else {
-		// No style specified - use default
-		styleFiles = []string{""}
+	// Collect style sources
+	styleFiles, err := collectImageFiles(styleSourcePath)
+	if err != nil {
+		fmt.Printf("  Warning: Failed to collect style files: %v\n", err)
+		styleFiles = []string{""} // Use default style
+	} else if len(styleFiles) > 1 {
+		fmt.Printf("  Found %d style images in directory\n", len(styleFiles))
 	}
 
 	// Loop through all style files
