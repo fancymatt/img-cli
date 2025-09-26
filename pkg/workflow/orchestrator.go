@@ -535,6 +535,35 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 		return nil, fmt.Errorf("no outfit source provided: either specify an outfit image path or use --outfit-text")
 	}
 
+	// Pre-count style files for accurate cost estimation
+	// We need to determine the style source to count properly
+	var numStyles int
+	if options.StyleReference != "" {
+		styleFiles, err := collectImageFiles(options.StyleReference)
+		if err != nil {
+			// If we can't count styles, assume 1
+			numStyles = 1
+		} else {
+			numStyles = len(styleFiles)
+		}
+	} else {
+		// When no style specified or using outfit as style, count as 1
+		numStyles = 1
+	}
+
+	// Calculate and check total cost before processing
+	estimatedImages := calculateOutfitSwapImageCount(
+		len(targetImages),
+		len(outfitFiles),
+		numStyles,
+		variations,
+	)
+
+	// Check cost and get user confirmation if needed
+	if err := checkWorkflowCost("outfit-swap", estimatedImages, options.SkipCostConfirm); err != nil {
+		return nil, err
+	}
+
 	// Process each subject
 	for subjectIndex, targetImage := range targetImages {
 		if len(targetImages) > 1 {

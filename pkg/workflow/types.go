@@ -20,6 +20,7 @@ type WorkflowOptions struct {
 	SendOriginal    bool   // Include outfit reference image in generation request
 	Variations      int
 	Prompt          string // For text-to-image generation and naming
+	SkipCostConfirm bool   // Skip cost confirmation prompts (for automation)
 }
 
 type WorkflowResult struct {

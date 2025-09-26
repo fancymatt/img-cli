@@ -20,6 +20,7 @@ var (
 	workflowPrompt    string
 	workflowSendOrig  bool
 	workflowVariations int
+	workflowNoConfirm bool
 )
 
 // workflowCmd represents the workflow command
@@ -50,6 +51,7 @@ func init() {
 	workflowCmd.Flags().StringVar(&workflowPrompt, "prompt", "", "Additional prompt text")
 	workflowCmd.Flags().BoolVar(&workflowSendOrig, "send-original", false, "Include reference images in requests")
 	workflowCmd.Flags().IntVar(&workflowVariations, "variations", 1, "Number of variations to generate per combination")
+	workflowCmd.Flags().BoolVar(&workflowNoConfirm, "no-confirm", false, "Skip cost confirmation prompts")
 }
 
 func runWorkflow(cmd *cobra.Command, args []string) error {
@@ -107,6 +109,7 @@ func runWorkflow(cmd *cobra.Command, args []string) error {
 		Prompt:          workflowPrompt,
 		SendOriginal:    workflowSendOrig,
 		Variations:      workflowVariations,
+		SkipCostConfirm: workflowNoConfirm,
 	}
 
 	// For outfit-swap workflow with --test flag, set the target images
