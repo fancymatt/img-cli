@@ -24,10 +24,14 @@ type WorkflowOptions struct {
 }
 
 type WorkflowResult struct {
-	Workflow  string       `json:"workflow"`
-	StartTime time.Time    `json:"start_time"`
-	EndTime   time.Time    `json:"end_time"`
-	Steps     []StepResult `json:"steps"`
+	Workflow       string       `json:"workflow"`
+	StartTime      time.Time    `json:"start_time"`
+	EndTime        time.Time    `json:"end_time"`
+	Steps          []StepResult `json:"steps"`
+	SubjectCount   int          `json:"subject_count,omitempty"`
+	OutfitCount    int          `json:"outfit_count,omitempty"`
+	StyleCount     int          `json:"style_count,omitempty"`
+	VariationCount int          `json:"variation_count,omitempty"`
 }
 
 type StepResult struct {

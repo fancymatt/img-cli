@@ -201,7 +201,43 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 	// Display results
 	fmt.Printf("\n✓ Outfit swap completed successfully\n")
 	fmt.Printf("Duration: %s\n", result.EndTime.Sub(result.StartTime))
-	fmt.Printf("Images generated: %d\n", len(result.Steps))
+
+	// Count actual generated images (only "combined" type steps)
+	generatedCount := 0
+	for _, step := range result.Steps {
+		if step.Type == "generation" && step.Name == "combined" {
+			generatedCount++
+		}
+	}
+
+	// Build the summary based on what was actually done
+	var summary string
+	if result.SubjectCount > 0 && result.OutfitCount > 0 {
+		parts := []string{}
+		if result.SubjectCount > 1 {
+			parts = append(parts, fmt.Sprintf("%d subjects", result.SubjectCount))
+		} else {
+			parts = append(parts, "1 subject")
+		}
+		if result.OutfitCount > 1 {
+			parts = append(parts, fmt.Sprintf("%d outfits", result.OutfitCount))
+		} else {
+			parts = append(parts, "1 outfit")
+		}
+		if result.StyleCount > 1 {
+			parts = append(parts, fmt.Sprintf("%d styles", result.StyleCount))
+		} else {
+			parts = append(parts, "1 style")
+		}
+		if result.VariationCount > 1 {
+			parts = append(parts, fmt.Sprintf("%d variations", result.VariationCount))
+		}
+		summary = fmt.Sprintf("Created %d images (%s)", generatedCount, strings.Join(parts, " × "))
+	} else {
+		summary = fmt.Sprintf("Created %d images", generatedCount)
+	}
+
+	fmt.Println(summary)
 
 	logger.Info("Outfit swap completed",
 		"duration", result.EndTime.Sub(result.StartTime),

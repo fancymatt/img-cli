@@ -461,6 +461,10 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 	} // End of subject loop
 
 	result.EndTime = time.Now()
+	result.SubjectCount = len(targetImages)
+	result.OutfitCount = len(outfitFiles)
+	result.StyleCount = numStyles
+	result.VariationCount = variations
 	return result, nil
 }
 
