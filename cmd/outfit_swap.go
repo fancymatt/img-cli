@@ -51,7 +51,7 @@ Examples:
 Default values:
   Outfit: ./outfits/shearling-black.png
   Style:  ./styles/plain-white.png
-  Subject: jaimee (when -t is used without value)`,
+  Subject: jaimee (when -t is not specified)`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runOutfitSwap,
 }
@@ -61,19 +61,21 @@ func init() {
 
 	// Shortcuts and full flags
 	outfitSwapCmd.Flags().StringVarP(&outfitStyleRef, "style", "s", "", "Style reference image (default: ./styles/plain-white.png)")
-	outfitSwapCmd.Flags().StringVarP(&outfitTestSubjects, "test", "t", "", "Test subjects from subjects/ directory (default: jaimee)")
+	outfitSwapCmd.Flags().StringVarP(&outfitTestSubjects, "test", "t", "", "Test subjects from subjects/ directory (default: jaimee if not specified)")
 	outfitSwapCmd.Flags().IntVarP(&outfitVariations, "variations", "v", 1, "Number of variations per combination")
 
 	// Additional options
 	outfitSwapCmd.Flags().BoolVar(&outfitSendOriginal, "send-original", false, "Include reference images in API requests")
 	outfitSwapCmd.Flags().BoolVar(&outfitNoConfirm, "no-confirm", false, "Skip cost confirmation prompts")
 	outfitSwapCmd.Flags().BoolVar(&outfitDebugPrompt, "debug", false, "Show debug information including prompts")
-
-	// Mark test flag as not requiring a value
-	outfitSwapCmd.Flags().Lookup("test").NoOptDefVal = defaultSubject
 }
 
 func runOutfitSwap(cmd *cobra.Command, args []string) error {
+	// Debug: log all arguments received
+	if len(args) > 1 {
+		logger.Debug("Received multiple arguments", "count", len(args), "args", args)
+	}
+
 	// Determine outfit source
 	var outfitPath string
 	if len(args) > 0 {
@@ -109,14 +111,14 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 
 	// Handle test subjects
 	var targetImages []string
-	if cmd.Flags().Changed("test") {
-		// Flag was used
-		if outfitTestSubjects == "" || outfitTestSubjects == defaultSubject {
-			// -t or --test with no value, or explicitly set to default
-			outfitTestSubjects = defaultSubject
-		}
 
-		// Parse subjects and build paths
+	// If test flag was not provided at all, use default
+	if !cmd.Flags().Changed("test") {
+		outfitTestSubjects = defaultSubject
+	}
+
+	// Parse subjects and build paths
+	if outfitTestSubjects != "" {
 		subjects := strings.Fields(outfitTestSubjects)
 		subjectsDir := "subjects"
 
@@ -141,28 +143,10 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 
 			targetImages = append(targetImages, subjectPath)
 		}
-	} else {
-		// No test flag, use default subject
-		outfitTestSubjects = defaultSubject
-		subjectPath := filepath.Join("subjects", defaultSubject)
 
-		// Try with extensions
-		if _, err := os.Stat(subjectPath); os.IsNotExist(err) {
-			for _, ext := range []string{".png", ".jpg", ".jpeg"} {
-				tryPath := subjectPath + ext
-				if _, err := os.Stat(tryPath); err == nil {
-					subjectPath = tryPath
-					break
-				}
-			}
+		if !cmd.Flags().Changed("test") {
+			logger.Info("Using default subject", "name", defaultSubject)
 		}
-
-		if _, err := os.Stat(subjectPath); os.IsNotExist(err) {
-			return errors.ErrFileNotFound(subjectPath)
-		}
-
-		targetImages = []string{subjectPath}
-		logger.Info("Using default subject", "name", defaultSubject)
 	}
 
 	// Set up output directory with timestamp
