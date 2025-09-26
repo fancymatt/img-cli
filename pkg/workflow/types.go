@@ -14,7 +14,8 @@ type WorkflowOptions struct {
 	OutfitReference string
 	OutfitText      string // Text description of outfit (alternative to OutfitReference)
 	HairReference   string
-	TargetImage     string
+	TargetImage     string   // Single target (for backward compatibility)
+	TargetImages    []string // Multiple targets for outfit-swap workflow
 	DebugPrompt     bool
 	SendOriginal    bool   // Include outfit reference image in generation request
 	Variations      int

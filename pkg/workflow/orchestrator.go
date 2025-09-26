@@ -495,12 +495,21 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 		Steps:     []StepResult{},
 	}
 
-	// The target must be specified - it's the subject to apply the outfit to
-	if options.TargetImage == "" {
+	// Collect target images - use TargetImages if available, otherwise fall back to TargetImage
+	var targetImages []string
+	if len(options.TargetImages) > 0 {
+		targetImages = options.TargetImages
+	} else if options.TargetImage != "" {
+		targetImages = []string{options.TargetImage}
+	} else {
 		return nil, fmt.Errorf("target subject must be specified for outfit-swap workflow")
 	}
-	targetImage := options.TargetImage
-	fmt.Printf("Applying to subject: %s\n", filepath.Base(targetImage))
+
+	if len(targetImages) == 1 {
+		fmt.Printf("Applying to subject: %s\n", filepath.Base(targetImages[0]))
+	} else {
+		fmt.Printf("Applying to %d subjects\n", len(targetImages))
+	}
 
 	// Determine number of variations to generate
 	variations := options.Variations
@@ -541,8 +550,14 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 		return nil, fmt.Errorf("no outfit source provided: either specify an outfit image path or use --outfit-text")
 	}
 
-	// Process each outfit
-	for outfitIndex, outfitPath := range outfitFiles {
+	// Process each subject
+	for subjectIndex, targetImage := range targetImages {
+		if len(targetImages) > 1 {
+			fmt.Printf("\n=== Subject %d/%d: %s ===\n", subjectIndex+1, len(targetImages), filepath.Base(targetImage))
+		}
+
+		// Process each outfit for this subject
+		for outfitIndex, outfitPath := range outfitFiles {
 		var outfitPrompt string
 		var hairDataFromOutfit json.RawMessage
 		var outfitSourceName string
@@ -836,20 +851,25 @@ func (o *Orchestrator) runOutfitSwapWorkflow(outfitSourcePath string, options Wo
 				continue
 			}
 
+			message := fmt.Sprintf("Generated with %s outfit and %s style", outfitSourceName, styleSourceName)
+			if len(targetImages) > 1 {
+				message = fmt.Sprintf("Generated %s with %s outfit and %s style", filepath.Base(targetImage), outfitSourceName, styleSourceName)
+			}
 			result.Steps = append(result.Steps, StepResult{
 				Type:       "generation",
 				Name:       "combined",
 				OutputPath: combinedResult.OutputPath,
-				Message:    fmt.Sprintf("Generated with %s outfit and %s style", outfitSourceName, styleSourceName),
+				Message:    message,
 			})
 
 			// Brief pause between generations
-			if v < variations || styleIndex < len(styleFiles)-1 || outfitIndex < len(outfitFiles)-1 {
+			if v < variations || styleIndex < len(styleFiles)-1 || outfitIndex < len(outfitFiles)-1 || subjectIndex < len(targetImages)-1 {
 				time.Sleep(1 * time.Second)
 			}
 		}
 	}
 	} // End of outfit loop
+	} // End of subject loop
 
 	result.EndTime = time.Now()
 	return result, nil

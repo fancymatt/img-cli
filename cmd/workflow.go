@@ -7,6 +7,7 @@ import (
 	"img-cli/pkg/workflow"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,7 +44,7 @@ Available workflows:
 func init() {
 	rootCmd.AddCommand(workflowCmd)
 
-	workflowCmd.Flags().StringVar(&workflowTest, "test", "", "Test on single subject from directory")
+	workflowCmd.Flags().StringVar(&workflowTest, "test", "", "Test on subject(s) from directory (space-separated for multiple)")
 	workflowCmd.Flags().StringVar(&workflowOutfitRef, "outfit-ref", "", "Path to outfit reference")
 	workflowCmd.Flags().StringVar(&workflowStyleRef, "style-ref", "", "Path to style reference")
 	workflowCmd.Flags().StringVar(&workflowPrompt, "prompt", "", "Additional prompt text")
@@ -108,31 +109,42 @@ func runWorkflow(cmd *cobra.Command, args []string) error {
 		Variations:      workflowVariations,
 	}
 
-	// For outfit-swap workflow with --test flag, set the target image
+	// For outfit-swap workflow with --test flag, set the target images
 	if workflowType == "outfit-swap" && workflowTest != "" {
-		// Construct the full path to the test subject
+		// Parse multiple subjects separated by spaces
+		subjects := strings.Fields(workflowTest)
 		subjectsDir := "subjects"
-		testSubjectPath := filepath.Join(subjectsDir, workflowTest)
+		var targetImages []string
 
-		// Check if it needs an extension
-		if _, err := os.Stat(testSubjectPath); os.IsNotExist(err) {
-			// Try with common image extensions
-			for _, ext := range []string{".png", ".jpg", ".jpeg"} {
-				tryPath := testSubjectPath + ext
-				if _, err := os.Stat(tryPath); err == nil {
-					testSubjectPath = tryPath
-					break
+		for _, subject := range subjects {
+			testSubjectPath := filepath.Join(subjectsDir, subject)
+
+			// Check if it needs an extension
+			if _, err := os.Stat(testSubjectPath); os.IsNotExist(err) {
+				// Try with common image extensions
+				for _, ext := range []string{".png", ".jpg", ".jpeg"} {
+					tryPath := testSubjectPath + ext
+					if _, err := os.Stat(tryPath); err == nil {
+						testSubjectPath = tryPath
+						break
+					}
 				}
 			}
+
+			// Verify the file exists
+			if _, err := os.Stat(testSubjectPath); os.IsNotExist(err) {
+				return errors.ErrFileNotFound(testSubjectPath)
+			}
+
+			targetImages = append(targetImages, testSubjectPath)
+			logger.Info("Using test subject", "path", testSubjectPath)
 		}
 
-		// Verify the file exists
-		if _, err := os.Stat(testSubjectPath); os.IsNotExist(err) {
-			return errors.ErrFileNotFound(testSubjectPath)
+		// Set both for compatibility
+		if len(targetImages) > 0 {
+			options.TargetImage = targetImages[0]  // For backward compatibility
+			options.TargetImages = targetImages
 		}
-
-		options.TargetImage = testSubjectPath
-		logger.Info("Using test subject", "path", testSubjectPath)
 	}
 
 	result, err := orchestrator.RunWorkflow(workflowType, inputPath, options)
