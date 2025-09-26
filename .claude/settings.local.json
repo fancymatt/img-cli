@@ -33,7 +33,9 @@
       "Bash(git checkout:*)",
       "Bash(git push:*)",
       "Bash(git rm:*)",
-      "Bash(del nul)"
+      "Bash(del nul)",
+      "Bash(ls:*)",
+      "Bash(xargs:*)"
     ],
     "deny": [],
     "ask": []
