@@ -86,11 +86,15 @@ For HAIR analysis, capture:
 - Professional styling vs. natural
 - Health and condition indicators
 
-Do NOT mention:
+Do NOT mention or include:
 - Glasses or eyewear
 - Weapons of any kind (guns, knives, etc.)
 - Weapon accessories (holsters, sheaths, ammunition, etc.)
 - Military or tactical equipment that could be weapon-related
+- Makeup, cosmetics, or facial features
+- Tattoos, body art, or skin markings
+- Piercings (except earrings as accessories)
+- Nail polish or nail art
 
 CRITICAL MATERIAL DESCRIPTION RULES:
 - ALWAYS describe materials as genuine, NEVER as "faux", "vegan", "synthetic", or "imitation"
@@ -157,10 +161,25 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 		"knife", "blade", "dagger", "sword", "machete",
 	}
 
-	// Helper function to check if a string contains weapon terms
-	containsWeaponTerm := func(s string) bool {
+	// List of makeup and body modification terms to filter out
+	beautyTerms := []string{
+		"makeup", "lipstick", "eyeshadow", "mascara", "foundation",
+		"blush", "concealer", "eyeliner", "bronzer", "highlighter",
+		"tattoo", "tattoos", "ink", "body art", "piercing",
+		"nail polish", "nail art", "manicure", "pedicure",
+	}
+
+	// Helper function to check if a string contains excluded terms
+	containsExcludedTerm := func(s string) bool {
 		lower := strings.ToLower(s)
+		// Check weapon terms
 		for _, term := range weaponTerms {
+			if strings.Contains(lower, term) {
+				return true
+			}
+		}
+		// Check beauty/makeup terms
+		for _, term := range beautyTerms {
 			if strings.Contains(lower, term) {
 				return true
 			}
@@ -173,7 +192,7 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 	for _, item := range outfit.Clothing {
 		// Check if item is a string
 		if str, ok := item.(string); ok {
-			if !containsWeaponTerm(str) {
+			if !containsExcludedTerm(str) {
 				filteredClothing = append(filteredClothing, item)
 			}
 		} else {
@@ -184,12 +203,15 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 	}
 	outfit.Clothing = filteredClothing
 
-	// Filter accessories
+	// Filter accessories (but allow earrings even if they contain "piercing")
 	var filteredAccessories []interface{}
 	for _, item := range outfit.Accessories {
 		// Check if item is a string
 		if str, ok := item.(string); ok {
-			if !containsWeaponTerm(str) {
+			// Special case: allow earrings even if they mention piercing
+			if strings.Contains(strings.ToLower(str), "earring") {
+				filteredAccessories = append(filteredAccessories, item)
+			} else if !containsExcludedTerm(str) {
 				filteredAccessories = append(filteredAccessories, item)
 			}
 		} else {
@@ -200,12 +222,12 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 	outfit.Accessories = filteredAccessories
 
 	// Filter the overall description
-	if containsWeaponTerm(outfit.Overall) {
-		// Remove sentences that contain weapon references
+	if containsExcludedTerm(outfit.Overall) {
+		// Remove sentences that contain excluded terms
 		sentences := strings.Split(outfit.Overall, ". ")
 		var filteredSentences []string
 		for _, sentence := range sentences {
-			if !containsWeaponTerm(sentence) {
+			if !containsExcludedTerm(sentence) {
 				filteredSentences = append(filteredSentences, sentence)
 			}
 		}
@@ -218,12 +240,12 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 	}
 
 	// Filter the style description
-	if containsWeaponTerm(outfit.Style) {
-		// Remove weapon-related style references
+	if containsExcludedTerm(outfit.Style) {
+		// Remove excluded term references
 		sentences := strings.Split(outfit.Style, ". ")
 		var filteredSentences []string
 		for _, sentence := range sentences {
-			if !containsWeaponTerm(sentence) {
+			if !containsExcludedTerm(sentence) {
 				filteredSentences = append(filteredSentences, sentence)
 			}
 		}

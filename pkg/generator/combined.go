@@ -172,8 +172,13 @@ func (c *CombinedGenerator) Generate(params GenerateParams) (*GenerateResult, er
 
 	// Always add these final instructions
 	promptBuilder.WriteString("\nKeep their facial features (eyes, nose, mouth, face shape) exactly the same.")
-	promptBuilder.WriteString("\nIMPORTANT: If the person is wearing glasses in the original image, they MUST keep wearing the exact same glasses. If they're not wearing glasses, they should not have glasses in the generated image.")
-	promptBuilder.WriteString("\nGlasses are NOT part of the outfit - preserve the subject's original eyewear status.")
+	promptBuilder.WriteString("\nIMPORTANT: Preserve ALL of the person's original features that are NOT clothing:")
+	promptBuilder.WriteString("\n- Keep their exact same makeup (or lack of makeup)")
+	promptBuilder.WriteString("\n- Keep any tattoos, birthmarks, or skin markings exactly as they are")
+	promptBuilder.WriteString("\n- Keep their same piercings (ears, nose, etc.)")
+	promptBuilder.WriteString("\n- Keep their nail polish or natural nails as they are")
+	promptBuilder.WriteString("\n- If they're wearing glasses, keep the exact same glasses")
+	promptBuilder.WriteString("\nOnly change the CLOTHING items - everything else about the person must remain exactly the same.")
 	promptBuilder.WriteString("\nGenerate a realistic photographic image, not an illustration or artwork.")
 
 	if !useOutfitImage {
