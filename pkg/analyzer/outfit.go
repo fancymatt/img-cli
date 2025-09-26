@@ -41,7 +41,7 @@ func (o *OutfitAnalyzer) Analyze(imagePath string) (json.RawMessage, error) {
   "clothing": [extremely detailed list of each clothing item with comprehensive descriptions like "fitted charcoal gray merino wool blazer with notch lapels, two-button closure, functional buttonholes, ticket pocket, and subtle pick-stitching along the edges"],
   "style": "comprehensive style analysis including fashion genre, formality level, aesthetic influences, seasonal appropriateness, and styling techniques",
   "colors": [precise color descriptions using fashion terminology like "midnight navy", "winter white", "camel beige", "oxblood red"],
-  "accessories": [exhaustive list with detailed descriptions of watches, jewelry, belts, bags, scarves, hats, etc. but NOT glasses],
+  "accessories": [exhaustive list with detailed descriptions of watches, jewelry, belts, bags, scarves, hats, etc. but NOT glasses, weapons, or weapon-related items],
   "overall": "thorough outfit analysis covering garment interaction, proportions, styling choices, layering techniques, fabric interplay, and overall aesthetic impact",
   "hair": {
     "color": "precise hair color description (e.g., 'ash blonde with platinum highlights', 'jet black', 'chestnut brown with caramel balayage')",
@@ -86,7 +86,11 @@ For HAIR analysis, capture:
 - Professional styling vs. natural
 - Health and condition indicators
 
-Do NOT mention glasses or eyewear.
+Do NOT mention:
+- Glasses or eyewear
+- Weapons of any kind (guns, knives, etc.)
+- Weapon accessories (holsters, sheaths, ammunition, etc.)
+- Military or tactical equipment that could be weapon-related
 
 CRITICAL MATERIAL DESCRIPTION RULES:
 - ALWAYS describe materials as genuine, NEVER as "faux", "vegan", "synthetic", or "imitation"
@@ -137,5 +141,98 @@ Remember: Fashion designers need this level of detail for accurate recreation an
 		return json.RawMessage(cleaned), nil
 	}
 
+	// Filter out any weapon-related items from the analysis
+	outfit = o.filterWeaponReferences(outfit)
+
 	return json.Marshal(outfit)
+}
+
+// filterWeaponReferences removes any weapon-related items from the outfit analysis
+func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription) gemini.OutfitDescription {
+	// List of weapon-related terms to filter out
+	weaponTerms := []string{
+		"gun", "pistol", "rifle", "firearm", "weapon", "holster",
+		"ammunition", "ammo", "bullet", "cartridge", "magazine",
+		"revolver", "shotgun", "carbine", "assault", "tactical",
+		"knife", "blade", "dagger", "sword", "machete",
+	}
+
+	// Helper function to check if a string contains weapon terms
+	containsWeaponTerm := func(s string) bool {
+		lower := strings.ToLower(s)
+		for _, term := range weaponTerms {
+			if strings.Contains(lower, term) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Filter clothing items
+	var filteredClothing []interface{}
+	for _, item := range outfit.Clothing {
+		// Check if item is a string
+		if str, ok := item.(string); ok {
+			if !containsWeaponTerm(str) {
+				filteredClothing = append(filteredClothing, item)
+			}
+		} else {
+			// For non-string items (like ClothingItem structs), keep them
+			// You might want to add more sophisticated filtering here
+			filteredClothing = append(filteredClothing, item)
+		}
+	}
+	outfit.Clothing = filteredClothing
+
+	// Filter accessories
+	var filteredAccessories []interface{}
+	for _, item := range outfit.Accessories {
+		// Check if item is a string
+		if str, ok := item.(string); ok {
+			if !containsWeaponTerm(str) {
+				filteredAccessories = append(filteredAccessories, item)
+			}
+		} else {
+			// For non-string items, keep them
+			filteredAccessories = append(filteredAccessories, item)
+		}
+	}
+	outfit.Accessories = filteredAccessories
+
+	// Filter the overall description
+	if containsWeaponTerm(outfit.Overall) {
+		// Remove sentences that contain weapon references
+		sentences := strings.Split(outfit.Overall, ". ")
+		var filteredSentences []string
+		for _, sentence := range sentences {
+			if !containsWeaponTerm(sentence) {
+				filteredSentences = append(filteredSentences, sentence)
+			}
+		}
+		outfit.Overall = strings.Join(filteredSentences, ". ")
+		// Clean up any trailing period issues
+		outfit.Overall = strings.TrimSuffix(outfit.Overall, "..")
+		if !strings.HasSuffix(outfit.Overall, ".") && outfit.Overall != "" {
+			outfit.Overall += "."
+		}
+	}
+
+	// Filter the style description
+	if containsWeaponTerm(outfit.Style) {
+		// Remove weapon-related style references
+		sentences := strings.Split(outfit.Style, ". ")
+		var filteredSentences []string
+		for _, sentence := range sentences {
+			if !containsWeaponTerm(sentence) {
+				filteredSentences = append(filteredSentences, sentence)
+			}
+		}
+		outfit.Style = strings.Join(filteredSentences, ". ")
+		outfit.Style = strings.TrimSuffix(outfit.Style, "..")
+		if !strings.HasSuffix(outfit.Style, ".") && outfit.Style != "" {
+			outfit.Style += "."
+		}
+	}
+
+	return outfit
 }
