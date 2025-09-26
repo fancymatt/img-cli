@@ -39,8 +39,8 @@ func (o *OutfitAnalyzer) Analyze(imagePath string) (json.RawMessage, error) {
 						Text: `Analyze the outfit, personal style, and hair in this image with extreme precision and detail. You are analyzing for fashion designers who need comprehensive information about every element. Return a JSON object with the following structure:
 {
   "clothing": [extremely detailed list of each clothing item with comprehensive descriptions like "fitted charcoal gray merino wool blazer with notch lapels, two-button closure, functional buttonholes, ticket pocket, and subtle pick-stitching along the edges"],
-  "style": "comprehensive style analysis including fashion genre, formality level, aesthetic influences, seasonal appropriateness, and styling techniques",
-  "colors": [precise color descriptions using fashion terminology like "midnight navy", "winter white", "camel beige", "oxblood red"],
+  "style": "clothing style ONLY - fashion genre, formality level, and garment styling techniques. DO NOT include environmental descriptions, lighting, or background elements",
+  "colors": [ONLY colors of the actual CLOTHING and ACCESSORIES - use fashion terminology like "midnight navy", "winter white", "camel beige", "oxblood red". DO NOT include lighting colors, background colors, or environmental colors],
   "accessories": [exhaustive list with detailed descriptions of watches, jewelry, belts, bags, scarves, hats, etc. but NOT glasses, weapons, or weapon-related items],
   "overall": "thorough outfit analysis covering garment interaction, proportions, styling choices, layering techniques, fabric interplay, and overall aesthetic impact",
   "hair": {
@@ -95,6 +95,10 @@ Do NOT mention or include:
 - Tattoos, body art, or skin markings
 - Piercings (except earrings as accessories)
 - Nail polish or nail art
+- Environmental lighting (neon lights, street lights, etc.)
+- Background elements or settings
+- Atmospheric descriptions (dark, moody, bright, etc.)
+- Location or scene descriptions
 
 CRITICAL MATERIAL DESCRIPTION RULES:
 - ALWAYS describe materials as genuine, NEVER as "faux", "vegan", "synthetic", or "imitation"
@@ -169,6 +173,14 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 		"nail polish", "nail art", "manicure", "pedicure",
 	}
 
+	// List of environmental/lighting terms to filter out
+	environmentTerms := []string{
+		"neon", "lighting", "backdrop", "background", "environment",
+		"atmosphere", "moody", "dark room", "bright room", "urban",
+		"street", "nightlife", "cyberpunk", "synthwave", "noir",
+		"futuristic", "retro-futurism", "rave", "club",
+	}
+
 	// Helper function to check if a string contains excluded terms
 	containsExcludedTerm := func(s string) bool {
 		lower := strings.ToLower(s)
@@ -180,6 +192,12 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 		}
 		// Check beauty/makeup terms
 		for _, term := range beautyTerms {
+			if strings.Contains(lower, term) {
+				return true
+			}
+		}
+		// Check environmental terms
+		for _, term := range environmentTerms {
 			if strings.Contains(lower, term) {
 				return true
 			}
@@ -220,6 +238,20 @@ func (o *OutfitAnalyzer) filterWeaponReferences(outfit gemini.OutfitDescription)
 		}
 	}
 	outfit.Accessories = filteredAccessories
+
+	// Filter colors to remove environmental/lighting colors
+	var filteredColors []string
+	for _, color := range outfit.Colors {
+		if !containsExcludedTerm(color) {
+			// Additional check for parenthetical lighting descriptions
+			if idx := strings.Index(color, "("); idx > 0 {
+				// Keep only the color part before parentheses
+				color = strings.TrimSpace(color[:idx])
+			}
+			filteredColors = append(filteredColors, color)
+		}
+	}
+	outfit.Colors = filteredColors
 
 	// Filter the overall description
 	if containsExcludedTerm(outfit.Overall) {

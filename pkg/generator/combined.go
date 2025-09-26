@@ -58,6 +58,11 @@ func (c *CombinedGenerator) Generate(params GenerateParams) (*GenerateResult, er
 			promptBuilder.WriteString("OUTFIT SPECIFICATION (must be followed EXACTLY):\n")
 			promptBuilder.WriteString(enhancedPrompt)
 			promptBuilder.WriteString("\n\nCRITICAL: Every color, pattern, and detail mentioned must be reproduced PRECISELY as specified.\n")
+			promptBuilder.WriteString("IMPORTANT: This outfit description is ONLY about clothing/garments. IGNORE any mentions of:\n")
+			promptBuilder.WriteString("- Lighting (neon, bright, dark, moody, etc.)\n")
+			promptBuilder.WriteString("- Environment/background (urban, street, cyberpunk, etc.)\n")
+			promptBuilder.WriteString("- Atmosphere or mood descriptions\n")
+			promptBuilder.WriteString("Only apply the ACTUAL CLOTHING ITEMS described.\n")
 		} else {
 			promptBuilder.WriteString("Generate an image of this person.\n")
 		}
@@ -68,6 +73,7 @@ func (c *CombinedGenerator) Generate(params GenerateParams) (*GenerateResult, er
 		var style gemini.VisualStyle
 		if err := json.Unmarshal(params.StyleData, &style); err == nil {
 			promptBuilder.WriteString("\nCRITICAL STYLE REQUIREMENTS - Apply the following visual style EXACTLY:\n")
+			promptBuilder.WriteString("NOTE: This style OVERRIDES any environmental/lighting hints in the outfit description.\n")
 
 			// Pose and body position (most important for matching style)
 			if style.Pose != "" {

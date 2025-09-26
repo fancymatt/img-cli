@@ -33,6 +33,24 @@ func collectImageFiles(path string) ([]string, error) {
 	return images, nil
 }
 
+// containsEnvironmentalReference checks if text contains environmental/lighting references
+func containsEnvironmentalReference(text string) bool {
+	environmentTerms := []string{
+		"neon", "lighting", "backdrop", "background", "environment",
+		"atmosphere", "moody", "dark", "bright", "urban", "street",
+		"nightlife", "cyberpunk", "synthwave", "noir", "futuristic",
+		"retro", "rave", "club", "scene", "setting",
+	}
+
+	lower := strings.ToLower(text)
+	for _, term := range environmentTerms {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	return false
+}
+
 // buildOutfitPrompt builds a detailed outfit prompt from analysis data
 func buildOutfitPrompt(outfit *gemini.OutfitDescription) string {
 	var promptBuilder strings.Builder
@@ -65,17 +83,14 @@ func buildOutfitPrompt(outfit *gemini.OutfitDescription) string {
 		}
 	}
 
-	// Add overall description
-	if outfit.Overall != "" {
+	// Add overall description (but filter out environmental references)
+	if outfit.Overall != "" && !containsEnvironmentalReference(outfit.Overall) {
 		promptBuilder.WriteString(". Overall styling: ")
 		promptBuilder.WriteString(outfit.Overall)
 	}
 
-	// Add style notes
-	if outfit.Style != "" {
-		promptBuilder.WriteString(". Style notes: ")
-		promptBuilder.WriteString(outfit.Style)
-	}
+	// Skip style notes as they often contain environmental/aesthetic descriptions
+	// that can influence the image style rather than just clothing
 
 	result := promptBuilder.String()
 	if result == "wearing exactly: " {
