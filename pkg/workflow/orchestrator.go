@@ -191,6 +191,13 @@ func (o *Orchestrator) RunWorkflow(workflow string, imagePath string, options Wo
 	if workflow != "outfit-swap" {
 		return nil, fmt.Errorf("unsupported workflow: %s (only 'outfit-swap' is supported)", workflow)
 	}
+
+	// Check if modular components are specified
+	if hasModularComponents(options) {
+		logger.Info("Using modular workflow due to modular components")
+		return o.runOutfitSwapModularWorkflow(imagePath, options)
+	}
+	logger.Info("Using standard outfit-swap workflow")
 	return o.runOutfitSwapWorkflow(imagePath, options)
 }
 

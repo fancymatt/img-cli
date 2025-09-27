@@ -52,6 +52,16 @@ func NewCacheForType(analysisType string, ttl time.Duration) *Cache {
 		cacheDir = "outfits/cache"
 	case "visual_style", "art_style":
 		cacheDir = "styles/cache"
+	case "hair_style":
+		cacheDir = "hair-style/cache"
+	case "hair_color":
+		cacheDir = "hair-color/cache"
+	case "makeup":
+		cacheDir = "makeup/cache"
+	case "expression":
+		cacheDir = "expressions/cache"
+	case "accessories":
+		cacheDir = "accessories/cache"
 	default:
 		cacheDir = "cache/analyses"
 	}

@@ -21,6 +21,12 @@ type WorkflowOptions struct {
 	Variations      int
 	Prompt          string // For text-to-image generation and naming
 	SkipCostConfirm bool   // Skip cost confirmation prompts (for automation)
+	// Modular component references
+	HairStyleRef   string
+	HairColorRef   string
+	MakeupRef      string
+	ExpressionRef  string
+	AccessoriesRef string
 }
 
 type WorkflowResult struct {

@@ -21,6 +21,12 @@ var (
 	outfitSendOriginal bool
 	outfitNoConfirm   bool
 	outfitDebugPrompt bool
+	// Modular component flags
+	outfitHairStyle   string
+	outfitHairColor   string
+	outfitMakeup      string
+	outfitExpression  string
+	outfitAccessories string
 )
 
 // Default values for common parameters
@@ -34,7 +40,7 @@ const (
 var outfitSwapCmd = &cobra.Command{
 	Use:   "outfit-swap [outfit]",
 	Short: "Apply outfit and style to test subjects",
-	Long: `Apply an outfit to one or more test subjects with optional style.
+	Long: `Apply an outfit to one or more test subjects with optional style and modular components.
 
 Examples:
   # Use all defaults (shearling-black outfit, plain-white style, jaimee subject)
@@ -49,10 +55,24 @@ Examples:
   # Directory of outfits with multiple subjects
   img-cli outfit-swap ./outfits/batch/ -t "jaimee kat izzy" -v 3
 
+  # Japanese theme with modular components
+  img-cli outfit-swap ./outfits/kimono.png \
+    --style ./styles/japan.png \
+    --hair-style ./hair-style/geisha.png \
+    --makeup ./makeup/geisha.png \
+    --accessories ./accessories/parasol.png
+
+  # Mix and match with directories (creates all combinations)
+  img-cli outfit-swap ./outfits/ \
+    --hair-style ./hair-style/ \
+    --makeup ./makeup/natural.png \
+    -t "jaimee kat"
+
 Default values:
-  Outfit: ./outfits/shearling-black.png
-  Style:  ./styles/plain-white.png
-  Subject: jaimee (when -t is not specified)`,
+  Outfit:  ./outfits/shearling-black.png
+  Style:   ./styles/plain-white.png
+  Subject: all subjects (when -t is not specified)
+           jaimee (when -t is specified without a value)`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runOutfitSwap,
 }
@@ -62,8 +82,15 @@ func init() {
 
 	// Shortcuts and full flags
 	outfitSwapCmd.Flags().StringVarP(&outfitStyleRef, "style", "s", "", "Style reference image (default: ./styles/plain-white.png)")
-	outfitSwapCmd.Flags().StringVarP(&outfitTestSubjects, "test", "t", "", "Test subjects from subjects/ directory (default: jaimee if not specified)")
+	outfitSwapCmd.Flags().StringVarP(&outfitTestSubjects, "test", "t", "", "Test subjects from subjects/ directory (omit flag for all subjects, use -t alone for jaimee)")
 	outfitSwapCmd.Flags().IntVarP(&outfitVariations, "variations", "v", 1, "Number of variations per combination")
+
+	// Modular component flags
+	outfitSwapCmd.Flags().StringVar(&outfitHairStyle, "hair-style", "", "Hair style reference image or directory")
+	outfitSwapCmd.Flags().StringVar(&outfitHairColor, "hair-color", "", "Hair color reference image or directory")
+	outfitSwapCmd.Flags().StringVar(&outfitMakeup, "makeup", "", "Makeup reference image or directory")
+	outfitSwapCmd.Flags().StringVar(&outfitExpression, "expression", "", "Expression reference image or directory")
+	outfitSwapCmd.Flags().StringVar(&outfitAccessories, "accessories", "", "Accessories reference image or directory")
 
 	// Additional options
 	outfitSwapCmd.Flags().BoolVar(&outfitSendOriginal, "send-original", false, "Include reference images in API requests")
@@ -118,17 +145,39 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 
 	// Handle test subjects
 	var targetImages []string
+	subjectsDir := "subjects"
 
-	// If test flag was not provided at all, use default
+	// Check if test flag was provided
 	if !cmd.Flags().Changed("test") {
-		outfitTestSubjects = defaultSubject
-	}
+		// No -t flag provided at all: use ALL subjects
+		logger.Info("No test subjects specified, using all subjects")
+		files, err := os.ReadDir(subjectsDir)
+		if err != nil {
+			return errors.Wrapf(err, errors.FileError, "failed to read subjects directory")
+		}
 
-	// Parse subjects and build paths
-	if outfitTestSubjects != "" {
+		for _, file := range files {
+			if !file.IsDir() {
+				ext := filepath.Ext(file.Name())
+				if ext == ".png" || ext == ".jpg" || ext == ".jpeg" {
+					targetImages = append(targetImages, filepath.Join(subjectsDir, file.Name()))
+				}
+			}
+		}
+
+		if len(targetImages) == 0 {
+			return errors.New(errors.FileError, "no image files found in subjects directory")
+		}
+	} else {
+		// -t flag was provided
+		if outfitTestSubjects == "" {
+			// -t provided with no value: use default "jaimee"
+			outfitTestSubjects = defaultSubject
+			logger.Info("Using default subject", "name", defaultSubject)
+		}
+
+		// Parse subjects and build paths
 		subjects := strings.Fields(outfitTestSubjects)
-		subjectsDir := "subjects"
-
 		for _, subject := range subjects {
 			subjectPath := filepath.Join(subjectsDir, subject)
 
@@ -150,10 +199,6 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 
 			targetImages = append(targetImages, subjectPath)
 		}
-
-		if !cmd.Flags().Changed("test") {
-			logger.Info("Using default subject", "name", defaultSubject)
-		}
 	}
 
 	// Set up output directory with timestamp
@@ -171,6 +216,12 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 		SendOriginal:    outfitSendOriginal,
 		SkipCostConfirm: outfitNoConfirm,
 		DebugPrompt:     outfitDebugPrompt,
+		// Modular components
+		HairStyleRef:   outfitHairStyle,
+		HairColorRef:   outfitHairColor,
+		MakeupRef:      outfitMakeup,
+		ExpressionRef:  outfitExpression,
+		AccessoriesRef: outfitAccessories,
 	}
 
 	// Initialize orchestrator
