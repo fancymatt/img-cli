@@ -30,6 +30,44 @@ type ModularConfig struct {
 	OutputDir      string // Optional: if not specified, will generate one
 }
 
+// isFilePath checks if a string is a file path or a text description
+func isFilePath(input string) bool {
+	if input == "" {
+		return false
+	}
+
+	// Check if it's a path (contains path separators or file extensions)
+	if strings.Contains(input, "/") || strings.Contains(input, "\\") || strings.Contains(input, ".") {
+		// Try to stat the file to see if it exists
+		if _, err := os.Stat(input); err == nil {
+			return true
+		}
+	}
+
+	// If it doesn't look like a path and doesn't exist as a file, it's text
+	return false
+}
+
+// processComponentInput handles both file paths and text descriptions for a component
+func processComponentInput(input string, componentType string) (string, bool) {
+	if input == "" {
+		return "", false
+	}
+
+	// For style, always treat as file path
+	if componentType == "style" || componentType == "visual_style" {
+		return input, true
+	}
+
+	// Check if it's a file path
+	if isFilePath(input) {
+		return input, true
+	}
+
+	// It's a text description
+	return input, false
+}
+
 
 // RunModularWorkflow executes the modular generation workflow
 func (o *Orchestrator) RunModularWorkflow(config ModularConfig) ([]string, error) {
@@ -141,24 +179,35 @@ func (o *Orchestrator) analyzeModularComponents(config ModularConfig) (*models.M
 
 	// Analyze outfit with exclusions
 	if config.OutfitRef != "" {
-		fmt.Printf("  Analyzing outfit from: %s\n", filepath.Base(config.OutfitRef))
+		if isFilePath(config.OutfitRef) {
+			fmt.Printf("  Analyzing outfit from: %s\n", filepath.Base(config.OutfitRef))
 
-		// Use modular outfit analyzer with exclusions
-		modularAnalyzer := analyzer.NewModularOutfitAnalyzer(o.client, excludeOpts)
-		data, err := o.analyzeWithCache("outfit", config.OutfitRef, modularAnalyzer)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze outfit: %w", err)
-		}
+			// Use modular outfit analyzer with exclusions
+			modularAnalyzer := analyzer.NewModularOutfitAnalyzer(o.client, excludeOpts)
+			data, err := o.analyzeWithCache("outfit", config.OutfitRef, modularAnalyzer)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze outfit: %w", err)
+			}
 
-		desc := o.extractOutfitDescription(data)
-		if config.Debug {
-			fmt.Printf("  DEBUG: Outfit description extracted: %s\n", desc)
-		}
-		components.Outfit = &models.ComponentData{
-			Type:        "outfit",
-			Description: desc,
-			JSONData:    data,
-			ImagePath:   config.OutfitRef,
+			desc := o.extractOutfitDescription(data)
+			if config.Debug {
+				fmt.Printf("  DEBUG: Outfit description extracted: %s\n", desc)
+			}
+			components.Outfit = &models.ComponentData{
+				Type:        "outfit",
+				Description: desc,
+				JSONData:    data,
+				ImagePath:   config.OutfitRef,
+			}
+		} else {
+			// It's a text description
+			fmt.Printf("  Using text description for outfit: %s\n", config.OutfitRef)
+			components.Outfit = &models.ComponentData{
+				Type:        "outfit",
+				Description: config.OutfitRef,
+				JSONData:    nil,
+				ImagePath:   "",
+			}
 		}
 	}
 
@@ -181,102 +230,157 @@ func (o *Orchestrator) analyzeModularComponents(config ModularConfig) (*models.M
 
 	// Analyze hair style
 	if config.HairStyleRef != "" {
-		fmt.Printf("  Analyzing hair style from: %s\n", filepath.Base(config.HairStyleRef))
+		if isFilePath(config.HairStyleRef) {
+			fmt.Printf("  Analyzing hair style from: %s\n", filepath.Base(config.HairStyleRef))
 
-		// Check if it's cached
-		if cache, exists := o.caches["hair_style"]; exists && o.enableCache {
-			if cachedData, found := cache.Get("hair_style", config.HairStyleRef); found {
-				fmt.Printf("    Using cached hair style analysis\n")
-				if config.Debug {
-					fmt.Printf("    DEBUG: Cached hair style data: %s\n", string(cachedData))
+			// Check if it's cached
+			if cache, exists := o.caches["hair_style"]; exists && o.enableCache {
+				if cachedData, found := cache.Get("hair_style", config.HairStyleRef); found {
+					fmt.Printf("    Using cached hair style analysis\n")
+					if config.Debug {
+						fmt.Printf("    DEBUG: Cached hair style data: %s\n", string(cachedData))
+					}
 				}
 			}
-		}
 
-		data, err := o.AnalyzeImage("hair_style", config.HairStyleRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze hair style: %w", err)
-		}
+			data, err := o.AnalyzeImage("hair_style", config.HairStyleRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze hair style: %w", err)
+			}
 
-		desc := o.extractHairStyleDescription(data)
-		if config.Debug {
-			fmt.Printf("  DEBUG: Raw hair style JSON: %s\n", string(data))
-			fmt.Printf("  DEBUG: Hair style description extracted: %s\n", desc)
-		}
-		components.HairStyle = &models.ComponentData{
-			Type:        "hair_style",
-			Description: desc,
-			JSONData:    data,
-			ImagePath:   config.HairStyleRef,
+			desc := o.extractHairStyleDescription(data)
+			if config.Debug {
+				fmt.Printf("  DEBUG: Raw hair style JSON: %s\n", string(data))
+				fmt.Printf("  DEBUG: Hair style description extracted: %s\n", desc)
+			}
+			components.HairStyle = &models.ComponentData{
+				Type:        "hair_style",
+				Description: desc,
+				JSONData:    data,
+				ImagePath:   config.HairStyleRef,
+			}
+		} else {
+			// It's a text description
+			fmt.Printf("  Using text description for hair style: %s\n", config.HairStyleRef)
+			components.HairStyle = &models.ComponentData{
+				Type:        "hair_style",
+				Description: config.HairStyleRef,
+				JSONData:    nil,
+				ImagePath:   "",
+			}
 		}
 	}
 
 	// Analyze hair color
 	if config.HairColorRef != "" {
-		fmt.Printf("  Analyzing hair color from: %s\n", filepath.Base(config.HairColorRef))
-		data, err := o.AnalyzeImage("hair_color", config.HairColorRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze hair color: %w", err)
-		}
+		if isFilePath(config.HairColorRef) {
+			fmt.Printf("  Analyzing hair color from: %s\n", filepath.Base(config.HairColorRef))
+			data, err := o.AnalyzeImage("hair_color", config.HairColorRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze hair color: %w", err)
+			}
 
-		desc := o.extractHairColorDescription(data)
-		components.HairColor = &models.ComponentData{
-			Type:        "hair_color",
-			Description: desc,
-			JSONData:    data,
-			ImagePath:   config.HairColorRef,
+			desc := o.extractHairColorDescription(data)
+			components.HairColor = &models.ComponentData{
+				Type:        "hair_color",
+				Description: desc,
+				JSONData:    data,
+				ImagePath:   config.HairColorRef,
+			}
+		} else {
+			// It's a text description
+			fmt.Printf("  Using text description for hair color: %s\n", config.HairColorRef)
+			components.HairColor = &models.ComponentData{
+				Type:        "hair_color",
+				Description: config.HairColorRef,
+				JSONData:    nil,
+				ImagePath:   "",
+			}
 		}
 	}
 
 	// Analyze makeup
 	if config.MakeupRef != "" {
-		fmt.Printf("  Analyzing makeup from: %s\n", filepath.Base(config.MakeupRef))
-		data, err := o.AnalyzeImage("makeup", config.MakeupRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze makeup: %w", err)
-		}
+		if isFilePath(config.MakeupRef) {
+			fmt.Printf("  Analyzing makeup from: %s\n", filepath.Base(config.MakeupRef))
+			data, err := o.AnalyzeImage("makeup", config.MakeupRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze makeup: %w", err)
+			}
 
-		desc := o.extractMakeupDescription(data)
-		components.Makeup = &models.ComponentData{
-			Type:        "makeup",
-			Description: desc,
-			JSONData:    data,
-			ImagePath:   config.MakeupRef,
+			desc := o.extractMakeupDescription(data)
+			components.Makeup = &models.ComponentData{
+				Type:        "makeup",
+				Description: desc,
+				JSONData:    data,
+				ImagePath:   config.MakeupRef,
+			}
+		} else {
+			// It's a text description
+			fmt.Printf("  Using text description for makeup: %s\n", config.MakeupRef)
+			components.Makeup = &models.ComponentData{
+				Type:        "makeup",
+				Description: config.MakeupRef,
+				JSONData:    nil,
+				ImagePath:   "",
+			}
 		}
 	}
 
 	// Analyze expression
 	if config.ExpressionRef != "" {
-		fmt.Printf("  Analyzing expression from: %s\n", filepath.Base(config.ExpressionRef))
-		data, err := o.AnalyzeImage("expression", config.ExpressionRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze expression: %w", err)
-		}
+		if isFilePath(config.ExpressionRef) {
+			fmt.Printf("  Analyzing expression from: %s\n", filepath.Base(config.ExpressionRef))
+			data, err := o.AnalyzeImage("expression", config.ExpressionRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze expression: %w", err)
+			}
 
-		// Extract expression, excluding gaze if style is also specified
-		desc := o.extractExpressionDescription(data, config.StyleRef != "")
-		components.Expression = &models.ComponentData{
-			Type:        "expression",
-			Description: desc,
-			JSONData:    data,
-			ImagePath:   config.ExpressionRef,
+			// Extract expression, excluding gaze if style is also specified
+			desc := o.extractExpressionDescription(data, config.StyleRef != "")
+			components.Expression = &models.ComponentData{
+				Type:        "expression",
+				Description: desc,
+				JSONData:    data,
+				ImagePath:   config.ExpressionRef,
+			}
+		} else {
+			// It's a text description
+			fmt.Printf("  Using text description for expression: %s\n", config.ExpressionRef)
+			components.Expression = &models.ComponentData{
+				Type:        "expression",
+				Description: config.ExpressionRef,
+				JSONData:    nil,
+				ImagePath:   "",
+			}
 		}
 	}
 
 	// Analyze accessories
 	if config.AccessoriesRef != "" {
-		fmt.Printf("  Analyzing accessories from: %s\n", filepath.Base(config.AccessoriesRef))
-		data, err := o.AnalyzeImage("accessories", config.AccessoriesRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to analyze accessories: %w", err)
-		}
+		if isFilePath(config.AccessoriesRef) {
+			fmt.Printf("  Analyzing accessories from: %s\n", filepath.Base(config.AccessoriesRef))
+			data, err := o.AnalyzeImage("accessories", config.AccessoriesRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze accessories: %w", err)
+			}
 
-		desc := o.extractAccessoriesDescription(data)
-		components.Accessories = &models.ComponentData{
-			Type:        "accessories",
-			Description: desc,
-			JSONData:    data,
-			ImagePath:   config.AccessoriesRef,
+			desc := o.extractAccessoriesDescription(data)
+			components.Accessories = &models.ComponentData{
+				Type:        "accessories",
+				Description: desc,
+				JSONData:    data,
+				ImagePath:   config.AccessoriesRef,
+			}
+		} else {
+			// It's a text description
+			fmt.Printf("  Using text description for accessories: %s\n", config.AccessoriesRef)
+			components.Accessories = &models.ComponentData{
+				Type:        "accessories",
+				Description: config.AccessoriesRef,
+				JSONData:    nil,
+				ImagePath:   "",
+			}
 		}
 	}
 

@@ -38,25 +38,31 @@ var generateModularCmd = &cobra.Command{
 Each component can be specified independently or left to defaults.
 
 Examples:
-  # Full Japanese theme example
+  # Using image references
   img-cli generate-modular subjects/person.png \
     --outfit outfits/kimono.png \
     --style styles/japan.png \
     --hair-style hair-style/ornate.png \
-    --hair-color hair-color/black.png \
-    --makeup makeup/geisha.png \
-    --accessories accessories/umbrella.png \
     --expression expressions/serene.png
 
-  # Mix and match components
+  # Using text descriptions (except for style)
+  img-cli generate-modular subjects/person.png \
+    --outfit "red leather jacket" \
+    --hair-style "messy bun" \
+    --hair-color "platinum blonde" \
+    --expression "scared" \
+    --makeup "bold red lipstick"
+
+  # Mix images and text
   img-cli generate-modular subjects/person.png \
     --outfit outfits/business-suit.png \
-    --hair-style hair-style/professional-bun.png \
-    --expression expressions/confident.png
+    --hair-style "professional bun" \
+    --expression "confident"
 
-  # Change only hair color, keep natural style
-  img-cli generate-modular subjects/person.png \
-    --hair-color hair-color/platinum-blonde.png
+Component Input Types:
+  - Subject: Image file only (required)
+  - Style: Image file only
+  - All others: Image file OR text description
 
 Component Independence:
   - Each component is analyzed and applied independently
@@ -117,36 +123,39 @@ func runGenerateModular(cmd *cobra.Command, args []string) error {
 	totalImages := modVariations
 	estimatedCost := float64(totalImages) * 0.04
 
-	if !modNoConfirm {
-		fmt.Printf("\n📊 Generation Cost Analysis:\n")
-		fmt.Printf("   Images to generate: %d\n", totalImages)
-		fmt.Printf("   Cost breakdown: %d images × $0.04 = $%.2f\n", totalImages, estimatedCost)
+	// Always show cost breakdown
+	fmt.Printf("\n📊 Generation Cost Analysis:\n")
+	fmt.Printf("   Images to generate: %d\n", totalImages)
+	fmt.Printf("   Cost breakdown: %d images × $0.04 = $%.2f\n", totalImages, estimatedCost)
 
-		// Show which components will be applied
-		fmt.Println("\n🎨 Components to apply:")
-		if modOutfitRef != "" {
-			fmt.Printf("   ✓ Outfit: %s\n", filepath.Base(modOutfitRef))
-		}
-		if modStyleRef != "" {
-			fmt.Printf("   ✓ Style: %s\n", filepath.Base(modStyleRef))
-		}
-		if modHairStyleRef != "" {
-			fmt.Printf("   ✓ Hair Style: %s\n", filepath.Base(modHairStyleRef))
-		}
-		if modHairColorRef != "" {
-			fmt.Printf("   ✓ Hair Color: %s\n", filepath.Base(modHairColorRef))
-		}
-		if modMakeupRef != "" {
-			fmt.Printf("   ✓ Makeup: %s\n", filepath.Base(modMakeupRef))
-		}
-		if modExpressionRef != "" {
-			fmt.Printf("   ✓ Expression: %s\n", filepath.Base(modExpressionRef))
-		}
-		if modAccessoriesRef != "" {
-			fmt.Printf("   ✓ Accessories: %s\n", filepath.Base(modAccessoriesRef))
-		}
+	// Show which components will be applied
+	fmt.Println("\n🎨 Components to apply:")
+	if modOutfitRef != "" {
+		fmt.Printf("   ✓ Outfit: %s\n", filepath.Base(modOutfitRef))
+	}
+	if modStyleRef != "" {
+		fmt.Printf("   ✓ Style: %s\n", filepath.Base(modStyleRef))
+	}
+	if modHairStyleRef != "" {
+		fmt.Printf("   ✓ Hair Style: %s\n", filepath.Base(modHairStyleRef))
+	}
+	if modHairColorRef != "" {
+		fmt.Printf("   ✓ Hair Color: %s\n", filepath.Base(modHairColorRef))
+	}
+	if modMakeupRef != "" {
+		fmt.Printf("   ✓ Makeup: %s\n", filepath.Base(modMakeupRef))
+	}
+	if modExpressionRef != "" {
+		fmt.Printf("   ✓ Expression: %s\n", filepath.Base(modExpressionRef))
+	}
+	if modAccessoriesRef != "" {
+		fmt.Printf("   ✓ Accessories: %s\n", filepath.Base(modAccessoriesRef))
+	}
 
-		fmt.Print("\n   Proceed? (y/N): ")
+	// Only ask for confirmation if cost exceeds $5 (unless --no-confirm is used)
+	if !modNoConfirm && estimatedCost > 5.00 {
+		fmt.Printf("\n⚠️  This will cost more than $5 ($%.2f)\n", estimatedCost)
+		fmt.Print("   Proceed? (y/N): ")
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {

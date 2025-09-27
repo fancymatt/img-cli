@@ -75,39 +75,41 @@ func (o *Orchestrator) runOutfitSwapModularWorkflow(outfitSourcePath string, opt
 
 	estimatedCost := float64(totalImages) * 0.04
 
-	// Cost confirmation
-	if !options.SkipCostConfirm {
-		fmt.Printf("\n📊 Workflow Cost Analysis for outfit-swap:\n")
-		fmt.Printf("   Images to generate: %d\n", totalImages)
-		fmt.Printf("   Cost breakdown: %d images × $0.04 = $%.2f\n", totalImages, estimatedCost)
+	// Always show cost analysis
+	fmt.Printf("\n📊 Workflow Cost Analysis for outfit-swap:\n")
+	fmt.Printf("   Images to generate: %d\n", totalImages)
+	fmt.Printf("   Cost breakdown: %d images × $0.04 = $%.2f\n", totalImages, estimatedCost)
 
-		// Show component breakdown
-		fmt.Println("\n🎨 Component combinations:")
-		fmt.Printf("   Subjects: %d\n", len(targetImages))
-		if len(outfitFiles) > 0 {
-			fmt.Printf("   Outfits: %d\n", len(outfitFiles))
-		}
-		if len(styleFiles) > 0 {
-			fmt.Printf("   Styles: %d\n", len(styleFiles))
-		}
-		if len(hairStyleFiles) > 0 {
-			fmt.Printf("   Hair styles: %d\n", len(hairStyleFiles))
-		}
-		if len(hairColorFiles) > 0 {
-			fmt.Printf("   Hair colors: %d\n", len(hairColorFiles))
-		}
-		if len(makeupFiles) > 0 {
-			fmt.Printf("   Makeup: %d\n", len(makeupFiles))
-		}
-		if len(expressionFiles) > 0 {
-			fmt.Printf("   Expressions: %d\n", len(expressionFiles))
-		}
-		if len(accessoriesFiles) > 0 {
-			fmt.Printf("   Accessories: %d\n", len(accessoriesFiles))
-		}
-		fmt.Printf("   Variations: %d\n", options.Variations)
+	// Show component breakdown
+	fmt.Println("\n🎨 Component combinations:")
+	fmt.Printf("   Subjects: %d\n", len(targetImages))
+	if len(outfitFiles) > 0 {
+		fmt.Printf("   Outfits: %d\n", len(outfitFiles))
+	}
+	if len(styleFiles) > 0 {
+		fmt.Printf("   Styles: %d\n", len(styleFiles))
+	}
+	if len(hairStyleFiles) > 0 {
+		fmt.Printf("   Hair styles: %d\n", len(hairStyleFiles))
+	}
+	if len(hairColorFiles) > 0 {
+		fmt.Printf("   Hair colors: %d\n", len(hairColorFiles))
+	}
+	if len(makeupFiles) > 0 {
+		fmt.Printf("   Makeup: %d\n", len(makeupFiles))
+	}
+	if len(expressionFiles) > 0 {
+		fmt.Printf("   Expressions: %d\n", len(expressionFiles))
+	}
+	if len(accessoriesFiles) > 0 {
+		fmt.Printf("   Accessories: %d\n", len(accessoriesFiles))
+	}
+	fmt.Printf("   Variations: %d\n", options.Variations)
 
-		fmt.Print("\n   Proceed? (y/N): ")
+	// Only ask for confirmation if cost exceeds $5 (unless --no-confirm is used)
+	if !options.SkipCostConfirm && estimatedCost > 5.00 {
+		fmt.Printf("\n⚠️  This will cost more than $5 ($%.2f)\n", estimatedCost)
+		fmt.Print("   Proceed? (y/N): ")
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {
@@ -212,17 +214,51 @@ func (o *Orchestrator) runOutfitSwapModularWorkflow(outfitSourcePath string, opt
 	return result, nil
 }
 
-// collectFilesForComponent collects files from a path (file or directory) or returns empty if not specified
+// collectFilesForComponent collects files from a path (file or directory) or handles text descriptions
 func collectFilesForComponent(path string, componentType string) ([]string, error) {
 	if path == "" {
 		return []string{}, nil
+	}
+
+	// For style, always treat as file path
+	if componentType == "style" || componentType == "visual_style" {
+		// Check if it's a file or directory
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("%s path does not exist: %s", componentType, path)
+			}
+			return nil, err
+		}
+
+		if info.IsDir() {
+			// Collect all image files from directory
+			files, err := collectImageFiles(path)
+			if err != nil {
+				return nil, err
+			}
+			if len(files) == 0 {
+				return nil, fmt.Errorf("no image files found in %s directory: %s", componentType, path)
+			}
+			return files, nil
+		}
+
+		// Single file
+		return []string{path}, nil
+	}
+
+	// For other components, check if it's a file path or text description
+	if !isFilePath(path) {
+		// It's a text description, return it as-is
+		return []string{path}, nil
 	}
 
 	// Check if it's a file or directory
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s path does not exist: %s", componentType, path)
+			// If it doesn't exist as a file, treat it as text description
+			return []string{path}, nil
 		}
 		return nil, err
 	}
