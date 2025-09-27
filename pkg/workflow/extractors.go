@@ -226,24 +226,43 @@ func (o *Orchestrator) extractMakeupDescription(data json.RawMessage) string {
 }
 
 // extractExpressionDescription extracts expression description from analysis
-func (o *Orchestrator) extractExpressionDescription(data json.RawMessage) string {
+// If excludeGaze is true, gaze direction information will be filtered out
+func (o *Orchestrator) extractExpressionDescription(data json.RawMessage, excludeGaze ...bool) string {
 	var result map[string]interface{}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return "Natural expression"
 	}
 
+	// Check if we should exclude gaze (when style is also specified)
+	shouldExcludeGaze := len(excludeGaze) > 0 && excludeGaze[0]
+
+	// Check if it's a cached entry with nested structure
+	var analysisData map[string]interface{}
+	if dataField, ok := result["data"].(map[string]interface{}); ok {
+		if analysis, ok := dataField["analysis"].(map[string]interface{}); ok {
+			// It's a cached entry with analysis nested under data.analysis
+			analysisData = analysis
+		}
+	} else if analysis, ok := result["analysis"].(map[string]interface{}); ok {
+		// It's a cached entry with analysis directly nested
+		analysisData = analysis
+	} else {
+		// Direct structure (not cached)
+		analysisData = result
+	}
+
 	var parts []string
 
-	if emotion, ok := result["primary_emotion"].(string); ok && emotion != "" {
+	if emotion, ok := analysisData["primary_emotion"].(string); ok && emotion != "" {
 		parts = append(parts, fmt.Sprintf("Primary emotion: %s", emotion))
 	}
 
-	if intensity, ok := result["intensity"].(string); ok && intensity != "" {
+	if intensity, ok := analysisData["intensity"].(string); ok && intensity != "" {
 		parts = append(parts, fmt.Sprintf("Intensity: %s", intensity))
 	}
 
 	// Extract facial features
-	if features, ok := result["facial_features"].(map[string]interface{}); ok {
+	if features, ok := analysisData["facial_features"].(map[string]interface{}); ok {
 		if eyes, ok := features["eyes"].(string); ok && eyes != "" {
 			parts = append(parts, fmt.Sprintf("Eyes: %s", eyes))
 		}
@@ -252,18 +271,33 @@ func (o *Orchestrator) extractExpressionDescription(data json.RawMessage) string
 		}
 	}
 
-	// Extract gaze
-	if gaze, ok := result["gaze"].(map[string]interface{}); ok {
-		if direction, ok := gaze["direction"].(string); ok && direction != "" {
-			parts = append(parts, fmt.Sprintf("Gaze: %s", direction))
+	// Only extract gaze if not excluded (style controls this when present)
+	if !shouldExcludeGaze {
+		if gaze, ok := analysisData["gaze"].(map[string]interface{}); ok {
+			if direction, ok := gaze["direction"].(string); ok && direction != "" {
+				parts = append(parts, fmt.Sprintf("Gaze: %s", direction))
+			}
 		}
 	}
 
-	if mood, ok := result["mood"].(string); ok && mood != "" {
+	if mood, ok := analysisData["mood"].(string); ok && mood != "" {
 		parts = append(parts, fmt.Sprintf("Mood: %s", mood))
 	}
 
-	if overall, ok := result["overall"].(string); ok && overall != "" {
+	// Handle overall description - filter out gaze-related phrases when needed
+	if overall, ok := analysisData["overall"].(string); ok && overall != "" {
+		if shouldExcludeGaze {
+			// Remove common gaze-related phrases
+			overall = strings.ReplaceAll(overall, ", with the gaze directly engaging the viewer in this moment of astonishment", "")
+			overall = strings.ReplaceAll(overall, ", with the gaze directly engaging the viewer", "")
+			overall = strings.ReplaceAll(overall, " with the gaze directly engaging the viewer", "")
+			overall = strings.ReplaceAll(overall, ", gazing directly at the camera", "")
+			overall = strings.ReplaceAll(overall, " gazing directly at the camera", "")
+			overall = strings.ReplaceAll(overall, ", looking directly at the viewer", "")
+			overall = strings.ReplaceAll(overall, " looking directly at the viewer", "")
+			overall = strings.ReplaceAll(overall, ", eyes locked on the camera", "")
+			overall = strings.ReplaceAll(overall, " eyes locked on the camera", "")
+		}
 		parts = append(parts, overall)
 	}
 

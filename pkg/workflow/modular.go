@@ -253,7 +253,8 @@ func (o *Orchestrator) analyzeModularComponents(config ModularConfig) (*models.M
 			return nil, fmt.Errorf("failed to analyze expression: %w", err)
 		}
 
-		desc := o.extractExpressionDescription(data)
+		// Extract expression, excluding gaze if style is also specified
+		desc := o.extractExpressionDescription(data, config.StyleRef != "")
 		components.Expression = &models.ComponentData{
 			Type:        "expression",
 			Description: desc,
@@ -325,11 +326,25 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 
 	// Add hair style description
 	if components.HairStyle != nil {
-		parts = append(parts, "HAIR STYLE (STRUCTURE ONLY - NOT COLOR):")
-		parts = append(parts, components.HairStyle.Description)
-		// If no hair color is specified, explicitly preserve original
+		// If no hair color is specified, make preservation VERY clear upfront
 		if components.HairColor == nil {
-			parts = append(parts, "CRITICAL: You MUST maintain the subject's ORIGINAL HAIR COLOR exactly as it appears in the source portrait image. IGNORE any hair color from the hair style reference. Apply ONLY the hairstyle structure, cut, shape, and styling techniques - ABSOLUTELY NO COLOR CHANGES.")
+			parts = append(parts, "⚠️ CRITICAL HAIR COLOR PRESERVATION ⚠️")
+			parts = append(parts, "DO NOT CHANGE THE SUBJECT'S HAIR COLOR! The subject's original hair color from the source portrait MUST be preserved EXACTLY.")
+			parts = append(parts, "If the subject has blonde hair, they MUST still have blonde hair in the result.")
+			parts = append(parts, "If the subject has red hair, they MUST still have red hair in the result.")
+			parts = append(parts, "If the subject has black hair, they MUST still have black hair in the result.")
+			parts = append(parts, "")
+		}
+
+		parts = append(parts, "HAIR STYLE (STRUCTURE/CUT/SHAPE ONLY - NOT COLOR):")
+		parts = append(parts, components.HairStyle.Description)
+
+		// Add another reminder if no color specified
+		if components.HairColor == nil {
+			parts = append(parts, "")
+			parts = append(parts, "REMINDER: Apply ONLY the hairstyle structure, cut, shape, and styling from the description above.")
+			parts = append(parts, "DO NOT change the hair color - keep the subject's ORIGINAL hair color from the source image.")
+			parts = append(parts, "The hair style description is about the CUT and STYLE only, not the color.")
 		}
 		parts = append(parts, "")
 	}
@@ -351,8 +366,11 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 
 	// Add expression description
 	if components.Expression != nil {
-		parts = append(parts, "FACIAL EXPRESSION:")
+		parts = append(parts, "FACIAL EXPRESSION (EMOTION ONLY - NOT GAZE DIRECTION):")
 		parts = append(parts, components.Expression.Description)
+		if components.Style != nil {
+			parts = append(parts, "IMPORTANT: The PHOTOGRAPHIC STYLE section below controls where the subject looks and camera angle. Apply only the emotional expression from above, not any gaze direction.")
+		}
 		parts = append(parts, "")
 	}
 
@@ -365,8 +383,14 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 
 	// Add style description last (photographic style)
 	if components.Style != nil {
-		parts = append(parts, "PHOTOGRAPHIC STYLE:")
+		parts = append(parts, "PHOTOGRAPHIC STYLE (CONTROLS CAMERA ANGLE AND COMPOSITION):")
 		parts = append(parts, components.Style.Description)
+		parts = append(parts, "CRITICAL: This photographic style section OVERRIDES all other components for:")
+		parts = append(parts, "- Camera angle and framing")
+		parts = append(parts, "- Where the subject is looking (e.g., at camera, in mirror, to the side)")
+		parts = append(parts, "- Composition and perspective")
+		parts = append(parts, "- Lighting and atmosphere")
+		parts = append(parts, "If the style shows someone looking in a mirror, the subject MUST be looking in a mirror, not at the camera.")
 		parts = append(parts, "")
 	}
 
@@ -379,7 +403,9 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 	}
 	// Add hair color preservation if only style is specified
 	if components.HairStyle != nil && components.HairColor == nil {
-		parts = append(parts, "- PRESERVE the subject's ORIGINAL HAIR COLOR from the source portrait - DO NOT change it")
+		parts = append(parts, "- ⚠️ CRITICAL: PRESERVE the subject's ORIGINAL HAIR COLOR exactly as shown in the source portrait")
+		parts = append(parts, "- The subject's hair color MUST NOT change - if they have blonde hair, keep it blonde")
+		parts = append(parts, "- Apply ONLY the hair CUT/STYLE/SHAPE, NOT the color")
 	}
 	parts = append(parts, "- Professional 9:16 vertical portrait format")
 	parts = append(parts, "- Waist-up framing showing outfit details")
