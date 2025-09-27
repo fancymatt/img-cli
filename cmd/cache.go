@@ -57,8 +57,8 @@ func runCache(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Total entries: %d\n", totalEntries)
 		fmt.Printf("  Total size: %.2f MB\n", float64(totalSize)/1024/1024)
 		fmt.Println("\nCache locations:")
-		fmt.Println("  Outfit cache: outfits/.cache")
-		fmt.Println("  Style caches: styles/.cache")
+		fmt.Println("  Outfit cache: outfits/cache")
+		fmt.Println("  Style caches: styles/cache")
 
 		if len(entriesByType) > 0 {
 			fmt.Println("\nEntries by type:")
@@ -87,7 +87,7 @@ func runCache(cmd *cobra.Command, args []string) error {
 		if err := cache.ClearType("outfit"); err != nil {
 			return errors.Wrap(err, errors.CacheError, "failed to clear outfit cache")
 		}
-		fmt.Println("✓ Outfit cache cleared successfully (outfits/.cache)")
+		fmt.Println("✓ Outfit cache cleared successfully (outfits/cache)")
 		logger.Info("Outfit cache cleared")
 
 	case "clear-visual_style":
@@ -95,7 +95,7 @@ func runCache(cmd *cobra.Command, args []string) error {
 		if err := cache.ClearType("visual_style"); err != nil {
 			return errors.Wrap(err, errors.CacheError, "failed to clear visual style cache")
 		}
-		fmt.Println("✓ Visual style cache cleared successfully (styles/.cache)")
+		fmt.Println("✓ Visual style cache cleared successfully (styles/cache)")
 		logger.Info("Visual style cache cleared")
 
 	case "clear-art_style":
@@ -103,7 +103,7 @@ func runCache(cmd *cobra.Command, args []string) error {
 		if err := cache.ClearType("art_style"); err != nil {
 			return errors.Wrap(err, errors.CacheError, "failed to clear art style cache")
 		}
-		fmt.Println("✓ Art style cache cleared successfully (styles/.cache)")
+		fmt.Println("✓ Art style cache cleared successfully (styles/cache)")
 		logger.Info("Art style cache cleared")
 
 	default:

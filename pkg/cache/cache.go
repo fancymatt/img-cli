@@ -29,7 +29,7 @@ type CacheEntry struct {
 
 func NewCache(cacheDir string, ttl time.Duration) *Cache {
 	if cacheDir == "" {
-		cacheDir = ".cache/analyses"
+		cacheDir = "cache/analyses"
 	}
 	if ttl == 0 {
 		ttl = 24 * time.Hour * 7 // Default 7 days
@@ -49,11 +49,11 @@ func NewCacheForType(analysisType string, ttl time.Duration) *Cache {
 
 	switch analysisType {
 	case "outfit":
-		cacheDir = "outfits/.cache"
+		cacheDir = "outfits/cache"
 	case "visual_style", "art_style":
-		cacheDir = "styles/.cache"
+		cacheDir = "styles/cache"
 	default:
-		cacheDir = ".cache/analyses"
+		cacheDir = "cache/analyses"
 	}
 
 	if ttl == 0 {

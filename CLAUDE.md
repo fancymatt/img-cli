@@ -19,11 +19,11 @@ This repository contains a sophisticated image generation application that uses 
 subjects/            # Input portrait images
 
 outfits/            # Reference outfit images
-  .cache/           # Cached outfit analyses (JSON)
+  cache/            # Cached outfit analyses (JSON)
     outfit_*.json   # Detailed outfit descriptions
 
 styles/             # Style reference images
-  .cache/           # Cached style analyses (JSON)
+  cache/            # Cached style analyses (JSON)
     visual_style_*.json
     art_style_*.json
 
@@ -36,8 +36,8 @@ output/             # Generated images (organized by date/time)
 
 ### Cache System (`pkg/cache/cache.go`)
 - Stores detailed analyses in directory-specific locations:
-  - Outfit analyses: `outfits/.cache/`
-  - Style analyses: `styles/.cache/`
+  - Outfit analyses: `outfits/cache/`
+  - Style analyses: `styles/cache/`
 - Cache entries include:
   - Detailed clothing descriptions
   - Style analysis
@@ -65,7 +65,7 @@ output/             # Generated images (organized by date/time)
 
 1. User provides outfit input (text or image path)
 2. If image path:
-   - Check for cached analysis in `outfits/.cache/outfit_[filename].json`
+   - Check for cached analysis in `outfits/cache/outfit_[filename].json`
    - If found: Use detailed description (clothing list, style, overall aesthetic)
    - If not found: Analyze the image first
 3. Generate new portraits using the description

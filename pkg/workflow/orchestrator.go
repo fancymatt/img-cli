@@ -95,9 +95,11 @@ func (o *Orchestrator) AnalyzeImage(analyzerType string, imagePath string) (json
 	// Try to get from cache
 	cached, found := c.Get(analyzerType, imagePath)
 	if found {
-		logger.Debug("Using cached analysis",
+		logger.Info("Using cached analysis",
 			"type", analyzerType,
 			"file", filepath.Base(imagePath))
+		// Also print to console for visibility
+		fmt.Printf("✓ Using cached %s analysis for %s\n", analyzerType, filepath.Base(imagePath))
 
 		// Check if cached data is the raw analysis or wrapped in a cache entry
 		// First try to parse as cache entry structure
