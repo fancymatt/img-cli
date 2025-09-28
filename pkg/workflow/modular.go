@@ -476,6 +476,13 @@ func (o *Orchestrator) analyzeWithCache(cacheType string, imagePath string, anal
 func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) string {
 	var parts []string
 
+	// Start with critical identity preservation instruction
+	parts = append(parts, "🔴 CRITICAL IDENTITY INSTRUCTION:")
+	parts = append(parts, "The person in the generated image MUST be the EXACT SAME INDIVIDUAL from the source portrait.")
+	parts = append(parts, "This is not about creating someone similar - it must be THEM, recognizable as the same person.")
+	parts = append(parts, "Preserve their exact facial features, bone structure, and identity throughout.")
+	parts = append(parts, "")
+
 	// Check if this is a POV/first-person style
 	isPOV := components.Style != nil && (
 		strings.Contains(strings.ToLower(components.Style.Description), "first-person") ||
@@ -488,6 +495,9 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 	if isPOV {
 		parts = append(parts, "🚨 THIS IS A FIRST-PERSON POV SHOT - CRITICAL INSTRUCTIONS 🚨")
 		parts = append(parts, "")
+		parts = append(parts, "🔴 IDENTITY PRESERVATION: This is the SAME PERSON from the provided portrait.")
+		parts = append(parts, "Any visible reflections MUST show their EXACT facial features.")
+		parts = append(parts, "")
 		parts = append(parts, "1. FRAMING: Create a FIRST-PERSON PERSPECTIVE exactly as shown in the style image")
 		parts = append(parts, "2. The camera IS the subject's eyes - shoot FROM their viewpoint, not AT them")
 		parts = append(parts, "3. COPY THE EXACT FRAMING from the style image")
@@ -499,12 +509,14 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 		parts = append(parts, "- Apply their outfit to whatever body parts are visible in the POV framing")
 		parts = append(parts, "")
 	} else if components.Style != nil {
-		parts = append(parts, "⚠️ CRITICAL INSTRUCTION: Create an image that EXACTLY matches the framing and composition described in the PHOTOGRAPHIC STYLE section below.")
+		parts = append(parts, "⚠️ CRITICAL INSTRUCTION: Generate an image of THIS EXACT PERSON with the framing described below.")
+		parts = append(parts, "The subject's facial features and identity MUST be preserved exactly.")
 		parts = append(parts, "DO NOT create a portrait or full-body shot unless the style explicitly describes one.")
-		parts = append(parts, "The provided person image is ONLY for extracting outfit/appearance details to apply to whatever framing the style requires.")
-		parts = append(parts, "If the style shows only legs, show ONLY legs. If only arms, show ONLY arms.")
+		parts = append(parts, "The provided person is not just for reference - they ARE the subject.")
+		parts = append(parts, "If the style shows only legs, show ONLY legs (but they're still this person's legs).")
+		parts = append(parts, "If only arms, show ONLY arms (but they're still this person's arms).")
 		parts = append(parts, "")
-		parts = append(parts, "The style description below is the ABSOLUTE AUTHORITY on what appears in frame.")
+		parts = append(parts, "The style description below controls framing, but this remains the SAME PERSON.")
 	} else {
 		parts = append(parts, "Generate a professional 9:16 portrait photograph with the following specifications:")
 	}
@@ -645,15 +657,20 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 	// Add standard requirements
 	parts = append(parts, "TECHNICAL REQUIREMENTS:")
 	if isPOV {
-		parts = append(parts, "- This is the subject's POV - preserve their EXACT identity in any visible reflections")
-		parts = append(parts, "- Mirror reflections must show the subject's precise facial features from the reference")
+		parts = append(parts, "- 🔴 CRITICAL: This is the SAME PERSON from the source portrait")
+		parts = append(parts, "- Mirror reflections must show their EXACT face (same eyes, nose, mouth, bone structure)")
+		parts = append(parts, "- This person must be immediately recognizable as the individual from the reference")
 		parts = append(parts, "- Visible hands/arms must match the subject's skin tone and body type")
 		parts = append(parts, "- Maintain the subject's exact hair color, style, and facial structure")
 	} else if components.Style != nil {
-		parts = append(parts, "- Apply the clothing and appearance details from the provided images to the framing specified by the style")
-		parts = append(parts, "- If face is visible in the style framing, maintain exact facial features from the original photo")
+		parts = append(parts, "- 🔴 CRITICAL: This must be the EXACT SAME PERSON from the source portrait")
+		parts = append(parts, "- If face is visible, it must show their IDENTICAL facial features (not similar, IDENTICAL)")
+		parts = append(parts, "- Their identity must be unmistakably preserved - same eyes, nose, mouth, face shape")
+		parts = append(parts, "- Apply the clothing to THIS specific person, not a generic model")
 	} else {
-		parts = append(parts, "- Maintain exact facial features and identity from the original photo")
+		parts = append(parts, "- 🔴 CRITICAL: Preserve the EXACT identity of the person from the source portrait")
+		parts = append(parts, "- This must be recognizably the SAME individual, not someone who looks similar")
+		parts = append(parts, "- Keep their exact facial features: eyes, nose, mouth, face shape, bone structure")
 	}
 	// Add makeup preservation note
 	if components.Makeup != nil {

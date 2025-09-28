@@ -36,10 +36,11 @@ func (c *CombinedGenerator) Generate(params GenerateParams) (*GenerateResult, er
 
 	// Start with base instructions - but let style control framing if provided
 	if params.StyleData != nil {
-		promptBuilder.WriteString("⚠️ CRITICAL: Create an image with the EXACT framing/composition from the style below.\n")
-		promptBuilder.WriteString("The person image provided is ONLY for outfit/appearance reference.\n")
+		promptBuilder.WriteString("⚠️ CRITICAL: Generate an image of THIS EXACT PERSON with their facial features and identity preserved.\n")
+		promptBuilder.WriteString("Apply the EXACT framing/composition from the style description below.\n")
 		promptBuilder.WriteString("DO NOT default to portrait or full-body - follow the style's framing EXACTLY.\n")
-		promptBuilder.WriteString("If style shows only arms, show ONLY arms. If only legs, show ONLY legs.\n\n")
+		promptBuilder.WriteString("If style shows only arms, show ONLY arms. If only legs, show ONLY legs.\n")
+		promptBuilder.WriteString("But whatever body parts are visible MUST belong to the same person from the provided image.\n\n")
 	} else {
 		promptBuilder.WriteString("Generate an image of this person with EXACT COLOR AND DETAIL ACCURACY.\n")
 	}
@@ -189,7 +190,10 @@ func (c *CombinedGenerator) Generate(params GenerateParams) (*GenerateResult, er
 	}
 
 	// Always add these final instructions
-	promptBuilder.WriteString("\nKeep their facial features (eyes, nose, mouth, face shape) exactly the same.")
+	promptBuilder.WriteString("\n\n🔴 CRITICAL IDENTITY PRESERVATION:")
+	promptBuilder.WriteString("\nThe person in the generated image MUST be the EXACT SAME PERSON from the source image.")
+	promptBuilder.WriteString("\nKeep their facial features (eyes, nose, mouth, face shape, bone structure) IDENTICAL.")
+	promptBuilder.WriteString("\nThis is the same individual, not a different person wearing similar outfit.")
 	promptBuilder.WriteString("\nIMPORTANT: Preserve ALL of the person's original features that are NOT clothing:")
 	promptBuilder.WriteString("\n- Keep their exact same makeup (or lack of makeup)")
 	promptBuilder.WriteString("\n- Keep any tattoos, birthmarks, or skin markings exactly as they are")

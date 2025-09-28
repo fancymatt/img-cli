@@ -5,20 +5,41 @@ A sophisticated command-line tool that uses Google's Gemini API to transform por
 ## 🚀 Features
 
 ### Core Capabilities
+- **Modular Component System**: Independent control of outfit, hair style/color, makeup, expression, and accessories
 - **Outfit Analysis & Generation**: Extract and apply detailed clothing descriptions
 - **Style Transfer**: Apply visual/photographic styles from reference images
 - **Art Style Transfer**: Apply artistic styles to images or generate from text
-- **Hair Preservation**: Maintain or modify hairstyles independently
-- **Batch Processing**: Process multiple images with consistent transformations
+- **Hair Preservation**: Separate control of hair style and color
+- **Facial Structure Preservation**: Makeup applied as surface layer only
+- **Batch Processing**: Process multiple images with all combinations
 - **Smart Caching**: Automatic caching of analyses for improved performance
 
 ### Analyzers
-- **Outfit Analyzer**: Extracts comprehensive outfit details including:
+- **Modular Outfit Analyzer**: Extracts outfit with configurable exclusions
   - Clothing items with fabric, construction, and hardware details
   - Style genre, formality, and aesthetic influences
-  - Hair color, style, length, and texture
-  - Accessories (excluding glasses)
-- **Visual Style Analyzer**: Identifies photographic characteristics:
+  - Optionally excludes hair, makeup, or accessories when specified separately
+- **Hair Style Analyzer**: Analyzes hairstyle structure only (not color)
+  - Cut, shape, and styling techniques
+  - Length, texture, volume, and layers
+  - Parting and front styling details
+- **Hair Color Analyzer**: Analyzes hair color only (not style)
+  - Base color, undertones, highlights, and lowlights
+  - Coloring techniques (balayage, ombre, etc.)
+  - Dimension and special effects
+- **Makeup Analyzer**: Analyzes cosmetic application
+  - Complexion (foundation, blush, highlighter, contour)
+  - Eye makeup (shadow, liner, mascara, brows)
+  - Lip color and finish
+- **Expression Analyzer**: Analyzes facial expressions
+  - Primary emotion and intensity
+  - Facial feature positions
+  - Gaze direction and mood
+- **Accessories Analyzer**: Extracts accessory details
+  - Jewelry (earrings, necklaces, bracelets, rings)
+  - Bags, belts, scarves, hats, watches
+  - Overall accessory styling
+- **Visual Style Analyzer**: Identifies photographic characteristics
   - Lighting setup and direction
   - Color grading and mood
   - Composition and framing
@@ -86,18 +107,44 @@ subjects/            # Input portrait images
   └── person2.png
 
 outfits/            # Reference outfit images
-  ├── .cache/       # Cached outfit analyses (auto-generated)
+  ├── cache/        # Cached outfit analyses (auto-generated)
   ├── suit.png
   └── casual.jpg
 
-styles/             # Style reference images
-  ├── .cache/       # Cached style analyses (auto-generated)
+styles/             # Visual/photographic style references
+  ├── cache/        # Cached style analyses (auto-generated)
   ├── dramatic.png
   └── soft.jpg
 
+hair-style/         # Hair style references (structure/cut only)
+  ├── cache/        # Cached hair style analyses
+  ├── professional.png
+  └── wavy.jpg
+
+hair-color/         # Hair color references
+  ├── cache/        # Cached hair color analyses
+  ├── blonde.png
+  └── auburn.jpg
+
+makeup/             # Makeup style references
+  ├── cache/        # Cached makeup analyses
+  ├── natural.png
+  └── glamorous.jpg
+
+expressions/        # Facial expression references
+  ├── cache/        # Cached expression analyses
+  ├── confident.png
+  └── serene.jpg
+
+accessories/        # Accessory references
+  ├── cache/        # Cached accessory analyses
+  ├── jewelry.png
+  └── watches.jpg
+
 output/             # Generated images (auto-organized)
-  └── YYYY-MM-DD/
-      └── HHMMSS/
+  └── YYYY-MM-DD/   # Date folder
+      └── HHMMSS/   # Timestamp folder
+          ├── outfit_style_subject_timestamp.png
           └── generated_images.png
 ```
 
@@ -160,17 +207,163 @@ Combine outfit and style from different sources:
 ./img-cli.exe workflow cross-reference ./subjects/person.jpg --outfit-ref ./outfits/casual.png --style-ref ./styles/outdoor.png
 ```
 
-#### Outfit Swap
-Apply an outfit to specific subjects with optional style:
+#### Outfit Swap (Most Powerful Workflow)
+
+The outfit-swap workflow is the most comprehensive and flexible workflow, supporting modular component control and batch processing.
+
+**Quick Flag Reference:**
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `[outfit]` | - | Outfit image/directory (positional) | `./outfits/shearling-black.png` |
+| `--test` | `-t` | Test subjects (omit for all) | All subjects / "jaimee" if -t "" |
+| `--style` | `-s` | Photographic style | `./styles/plain-white.png` |
+| `--hair-style` | - | Hair style (cut/shape only) | - |
+| `--hair-color` | - | Hair color only | - |
+| `--makeup` | - | Makeup style | - |
+| `--expression` | - | Facial expression | - |
+| `--accessories` | `-a` | Accessories (also --accessory) | - |
+| `--variations` | `-v` | Variations per combo | 1 |
+| `--send-original` | - | Include refs in API | false |
+| `--no-confirm` | - | Skip cost prompt | false |
+| `--debug` | - | Show debug info | false |
+
+**Basic Usage:**
 ```bash
-# Apply outfit to specific test subject
-./img-cli.exe workflow outfit-swap ./outfits/suit.png --test person1
+# Simple outfit swap (uses all subjects by default)
+./img-cli.exe outfit-swap ./outfits/suit.png
 
-# Apply outfit with random style from directory
-./img-cli.exe workflow outfit-swap ./outfits/suit.png --style-ref ./styles/batch/ --test person1
+# Specify particular subjects
+./img-cli.exe outfit-swap ./outfits/suit.png -t "jaimee kat izzy"
 
-# Apply outfit to all subjects in directory
-./img-cli.exe workflow outfit-swap ./outfits/suit.png
+# Use default subject (jaimee) with empty -t flag
+./img-cli.exe outfit-swap ./outfits/suit.png -t ""
+```
+
+**Subject Selection:**
+- **No `-t` flag**: Processes ALL subjects in `subjects/` directory
+- **`-t ""`**: Uses default subject "jaimee"
+- **`-t "name1 name2"`**: Uses specified subjects (without file extensions)
+
+**Style Control:**
+```bash
+# Add a photographic style
+./img-cli.exe outfit-swap ./outfits/suit.png --style ./styles/dramatic.png
+
+# Use default style (plain-white)
+./img-cli.exe outfit-swap ./outfits/suit.png -s ./styles/plain-white.png
+```
+
+**Modular Component Control:**
+
+The outfit-swap workflow supports independent control of each visual component:
+
+```bash
+# Full modular control - Japanese theme example
+./img-cli.exe outfit-swap ./outfits/kimono.png \
+  --style ./styles/japan.png \
+  --hair-style ./hair-style/geisha.png \
+  --hair-color ./hair-color/black.png \
+  --makeup ./makeup/geisha.png \
+  --expression ./expressions/serene.png \
+  -a ./accessories/parasol.png \
+  -t "jaimee"
+
+# Mix and match components
+./img-cli.exe outfit-swap ./outfits/business-suit.png \
+  --hair-style ./hair-style/professional.png \
+  --makeup ./makeup/natural.png \
+  -t "kat izzy"
+
+# Hair style without changing color (preserves subject's natural hair color)
+./img-cli.exe outfit-swap ./outfits/casual.png \
+  --hair-style ./hair-style/wavy.png
+
+# Hair color without changing style (preserves subject's natural hair style)
+./img-cli.exe outfit-swap ./outfits/dress.png \
+  --hair-color ./hair-color/blonde.png
+```
+
+**Directory Processing (Batch Mode):**
+
+Any component parameter can accept either a single file or a directory. When directories are provided, the workflow creates all possible combinations:
+
+```bash
+# Process all outfits with all hair styles for specific subjects
+./img-cli.exe outfit-swap ./outfits/ \
+  --hair-style ./hair-style/ \
+  -t "jaimee kat"
+
+# All combinations: 3 outfits × 2 styles × 2 subjects = 12 images
+./img-cli.exe outfit-swap ./outfits/batch/ \
+  --style ./styles/batch/ \
+  -t "jaimee kat"
+
+# Mix single files and directories
+./img-cli.exe outfit-swap ./outfits/ \
+  --style ./styles/professional.png \
+  --makeup ./makeup/ \
+  -t "izzy"
+```
+
+**Component Independence:**
+
+Each component is applied independently without affecting others:
+- **Outfit**: Applied without including hair, makeup, or accessories if specified separately
+- **Hair Style**: Applied without changing hair color (unless --hair-color is also specified)
+- **Hair Color**: Applied without changing hair style (unless --hair-style is also specified)
+- **Makeup**: Applied as surface layer only, preserving facial structure
+- **Expression**: Changes facial expression without altering identity
+- **Accessories**: Added without affecting outfit analysis
+
+**Advanced Options:**
+```bash
+# Generate multiple variations per combination
+./img-cli.exe outfit-swap ./outfits/suit.png -v 3
+
+# Include reference images in API request for more accuracy
+./img-cli.exe outfit-swap ./outfits/detailed.png --send-original
+
+# Skip cost confirmation prompt
+./img-cli.exe outfit-swap ./outfits/ --no-confirm
+
+# Show debug information including prompts
+./img-cli.exe outfit-swap ./outfits/test.png --debug
+```
+
+**Output Organization:**
+
+Generated images are automatically organized:
+```
+output/
+  └── 2024-01-15/          # Date folder
+      └── 143022/          # Timestamp folder
+          ├── suit_dramatic_jaimee_20240115_143025.png
+          ├── suit_dramatic_kat_20240115_143028.png
+          └── suit_dramatic_izzy_20240115_143031.png
+```
+
+File naming convention: `{outfit}_{style}_{subject}_{timestamp}.png`
+
+**Complete Example Workflow:**
+
+```bash
+# Professional headshots with consistent style
+./img-cli.exe outfit-swap ./outfits/business-suit.png \
+  --style ./styles/corporate.png \
+  --hair-style ./hair-style/professional.png \
+  --makeup ./makeup/professional.png \
+  --expression ./expressions/confident.png \
+  -t "jaimee kat izzy sarah" \
+  -v 2 \
+  --send-original
+
+# This generates 8 images (4 subjects × 2 variations) with:
+# - Business suit outfit
+# - Corporate photographic style
+# - Professional hairstyle (preserving natural color)
+# - Professional makeup (preserving facial structure)
+# - Confident expression
+# - Original outfit reference included for accuracy
 ```
 
 #### Art Style Transfer
@@ -198,6 +391,11 @@ The application automatically caches analysis results for 7 days to improve perf
 ./img-cli.exe cache clear-outfit
 ./img-cli.exe cache clear-visual_style
 ./img-cli.exe cache clear-art_style
+./img-cli.exe cache clear-hair_style
+./img-cli.exe cache clear-hair_color
+./img-cli.exe cache clear-makeup
+./img-cli.exe cache clear-expression
+./img-cli.exe cache clear-accessories
 ```
 
 ### Global Options
@@ -325,6 +523,35 @@ Contributions are welcome! Please ensure:
 ## 📄 License
 
 [Your License Here]
+
+## 🔍 Troubleshooting
+
+### Outfit-Swap Workflow
+
+**Hair color changes when only style specified:**
+- The system explicitly preserves original hair color when only `--hair-style` is used
+- Ensure you're not also specifying `--hair-color`
+
+**Makeup changes facial structure:**
+- Makeup is applied as surface layer only
+- The system includes explicit instructions to preserve bone structure
+- Report persistent issues with specific makeup references
+
+**Accessories not appearing:**
+- Check that accessories are visible in the reference image
+- Some items (glasses, weapons) are explicitly excluded
+- Verify the cache is up to date with `cache clear-accessories`
+
+**Wrong subjects being processed:**
+- No `-t` flag: processes ALL subjects
+- `-t ""`: uses only "jaimee"
+- `-t "name1 name2"`: uses specified subjects
+- Check subjects directory for available files
+
+**Output organization:**
+- All images from one command go to the same timestamp folder
+- Filename format: `{outfit}_{style}_{subject}_{timestamp}.png`
+- Check `output/YYYY-MM-DD/HHMMSS/` for generated images
 
 ## 🆘 Support
 

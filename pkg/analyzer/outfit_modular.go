@@ -135,28 +135,5 @@ CRITICAL REQUIREMENTS:
 	}
 
 	textResp := gemini.ExtractTextFromResponse(resp)
-	if textResp == "" {
-		return nil, fmt.Errorf("no text response from API")
-	}
-
-	// Clean the response - remove markdown code blocks if present
-	cleaned := strings.TrimSpace(textResp)
-	if strings.HasPrefix(cleaned, "```json") {
-		cleaned = strings.TrimPrefix(cleaned, "```json")
-		cleaned = strings.TrimSuffix(cleaned, "```")
-		cleaned = strings.TrimSpace(cleaned)
-	} else if strings.HasPrefix(cleaned, "```") {
-		cleaned = strings.TrimPrefix(cleaned, "```")
-		cleaned = strings.TrimSuffix(cleaned, "```")
-		cleaned = strings.TrimSpace(cleaned)
-	}
-
-	// Validate it's JSON
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
-		// If not valid JSON, return an error
-		return nil, fmt.Errorf("invalid JSON response: %w", err)
-	}
-
-	return json.RawMessage(cleaned), nil
+	return CleanAndValidateJSONResponse(textResp)
 }

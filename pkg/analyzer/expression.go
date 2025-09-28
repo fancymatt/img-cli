@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"img-cli/pkg/gemini"
-	"strings"
 )
 
 type ExpressionAnalyzer struct {
@@ -20,23 +19,7 @@ func NewExpressionAnalyzer(client *gemini.Client) *ExpressionAnalyzer {
 }
 
 func (e *ExpressionAnalyzer) Analyze(imagePath string) (json.RawMessage, error) {
-	imageData, mimeType, err := gemini.LoadImageAsBase64(imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("error loading image: %w", err)
-	}
-
-	request := gemini.Request{
-		Contents: []gemini.Content{
-			{
-				Parts: []interface{}{
-					gemini.BlobPart{
-						InlineData: gemini.InlineData{
-							MimeType: mimeType,
-							Data:     imageData,
-						},
-					},
-					gemini.TextPart{
-						Text: `Analyze ONLY the facial expression and emotional state in this image. Ignore all other elements including clothing, hair, makeup, and accessories. Return a JSON object with the following structure:
+	prompt := `Analyze ONLY the facial expression and emotional state in this image. Ignore all other elements including clothing, hair, makeup, and accessories. Return a JSON object with the following structure:
 {
   "primary_emotion": "main emotion displayed (e.g., 'joy', 'serenity', 'confidence', 'contemplation', 'surprise')",
   "intensity": "emotional intensity level (e.g., 'subtle', 'moderate', 'intense', 'restrained')",
@@ -60,46 +43,18 @@ IMPORTANT:
 - Focus ONLY on facial expression and emotion
 - Do not describe physical features, only expressions
 - Be specific about subtle emotional nuances
-- Describe what emotion/mood is being conveyed, not physical appearance`,
-					},
-				},
-			},
-		},
-		GenerationConfig: &gemini.GenerationConfig{
-			Temperature: 0.1,
-			TopP:        0.95,
-			TopK:        20,
-		},
+- Describe what emotion/mood is being conveyed, not physical appearance`
+
+	request, err := BuildImageAnalysisRequest(imagePath, prompt, gemini.AnalyzerConfig)
+	if err != nil {
+		return nil, err
 	}
 
-	resp, err := e.client.SendRequest(request)
+	resp, err := e.client.SendRequest(*request)
 	if err != nil {
 		return nil, fmt.Errorf("error sending request: %w", err)
 	}
 
 	textResp := gemini.ExtractTextFromResponse(resp)
-	if textResp == "" {
-		return nil, fmt.Errorf("no text response from API")
-	}
-
-	// Clean the response - remove markdown code blocks if present
-	cleaned := strings.TrimSpace(textResp)
-	if strings.HasPrefix(cleaned, "```json") {
-		cleaned = strings.TrimPrefix(cleaned, "```json")
-		cleaned = strings.TrimSuffix(cleaned, "```")
-		cleaned = strings.TrimSpace(cleaned)
-	} else if strings.HasPrefix(cleaned, "```") {
-		cleaned = strings.TrimPrefix(cleaned, "```")
-		cleaned = strings.TrimSuffix(cleaned, "```")
-		cleaned = strings.TrimSpace(cleaned)
-	}
-
-	// Validate it's JSON
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
-		// If not valid JSON, return an error
-		return nil, fmt.Errorf("invalid JSON response: %w", err)
-	}
-
-	return json.RawMessage(cleaned), nil
+	return CleanAndValidateJSONResponse(textResp)
 }
