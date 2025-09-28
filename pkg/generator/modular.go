@@ -40,7 +40,29 @@ func (g *ModularGenerator) Generate(req ModularRequest) (string, error) {
 	// Build request parts
 	var parts []interface{}
 
-	// Add subject image
+	// Check if we have a style that should control framing
+	hasFramingStyle := req.Components != nil && req.Components.Style != nil &&
+		(strings.Contains(strings.ToLower(req.Components.Style.Description), "first-person") ||
+		 strings.Contains(strings.ToLower(req.Components.Style.Description), "first person") ||
+		 strings.Contains(strings.ToLower(req.Components.Style.Description), "pov") ||
+		 strings.Contains(strings.ToLower(req.Components.Style.Description), "extreme close-up") ||
+		 strings.Contains(strings.ToLower(req.Components.Style.Description), "only") ||
+		 strings.Contains(strings.ToLower(req.Components.Style.Description), "foreground"))
+
+	// If style controls framing and we're sending originals, put style FIRST
+	if hasFramingStyle && req.SendOriginals && req.Components.Style != nil && req.Components.Style.ImagePath != "" {
+		styleData, styleMime, err := gemini.LoadImageAsBase64(req.Components.Style.ImagePath)
+		if err == nil {
+			parts = append(parts, gemini.BlobPart{
+				InlineData: gemini.InlineData{
+					MimeType: styleMime,
+					Data:     styleData,
+				},
+			})
+		}
+	}
+
+	// Add subject image (after style if style controls framing)
 	parts = append(parts, gemini.BlobPart{
 		InlineData: gemini.InlineData{
 			MimeType: subjectMime,
@@ -48,7 +70,7 @@ func (g *ModularGenerator) Generate(req ModularRequest) (string, error) {
 		},
 	})
 
-	// Optionally add reference images
+	// Optionally add other reference images
 	if req.SendOriginals && req.Components != nil {
 		// Add outfit reference if available
 		if req.Components.Outfit != nil && req.Components.Outfit.ImagePath != "" {
@@ -63,8 +85,21 @@ func (g *ModularGenerator) Generate(req ModularRequest) (string, error) {
 			}
 		}
 
-		// Add style reference if available
-		if req.Components.Style != nil && req.Components.Style.ImagePath != "" {
+		// Add over-outfit reference if available (for layered outfits)
+		if req.Components.OverOutfit != nil && req.Components.OverOutfit.ImagePath != "" {
+			overOutfitData, overOutfitMime, err := gemini.LoadImageAsBase64(req.Components.OverOutfit.ImagePath)
+			if err == nil {
+				parts = append(parts, gemini.BlobPart{
+					InlineData: gemini.InlineData{
+						MimeType: overOutfitMime,
+						Data:     overOutfitData,
+					},
+				})
+			}
+		}
+
+		// Add style reference if available (but skip if we already added it first for framing control)
+		if !hasFramingStyle && req.Components.Style != nil && req.Components.Style.ImagePath != "" {
 			styleData, styleMime, err := gemini.LoadImageAsBase64(req.Components.Style.ImagePath)
 			if err == nil {
 				parts = append(parts, gemini.BlobPart{

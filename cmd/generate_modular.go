@@ -15,6 +15,7 @@ import (
 var (
 	// Modular component references
 	modOutfitRef      string
+	modOverOutfitRef  string
 	modStyleRef       string
 	modHairStyleRef   string
 	modHairColorRef   string
@@ -59,6 +60,13 @@ Examples:
     --hair-style "professional bun" \
     --expression "confident"
 
+  # Layered outfits (jacket from first outfit worn over complete second outfit)
+  img-cli generate-modular subjects/person.png \
+    --outfit outfits/punk-jacket.png \
+    --over-outfit outfits/dress.png \
+    --style styles/winter.png
+  # Result: dress + only the jacket from punk-jacket outfit
+
 Component Input Types:
   - Subject: Image file only (required)
   - Style: Image file only
@@ -77,6 +85,7 @@ func init() {
 
 	// Component flags
 	generateModularCmd.Flags().StringVar(&modOutfitRef, "outfit", "", "Outfit reference image")
+	generateModularCmd.Flags().StringVar(&modOverOutfitRef, "over-outfit", "", "Complete base outfit; main outfit's outer layer (jacket/coat) will be worn over this")
 	generateModularCmd.Flags().StringVar(&modStyleRef, "style", "", "Photo style reference image")
 	generateModularCmd.Flags().StringVar(&modHairStyleRef, "hair-style", "", "Hair style reference image")
 	generateModularCmd.Flags().StringVar(&modHairColorRef, "hair-color", "", "Hair color reference image")
@@ -108,6 +117,7 @@ func runGenerateModular(cmd *cobra.Command, args []string) error {
 	config := workflow.ModularConfig{
 		SubjectPath:    subjectPath,
 		OutfitRef:      modOutfitRef,
+		OverOutfitRef:  modOverOutfitRef,
 		StyleRef:       modStyleRef,
 		HairStyleRef:   modHairStyleRef,
 		HairColorRef:   modHairColorRef,
@@ -132,6 +142,9 @@ func runGenerateModular(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n🎨 Components to apply:")
 	if modOutfitRef != "" {
 		fmt.Printf("   ✓ Outfit: %s\n", filepath.Base(modOutfitRef))
+	}
+	if modOverOutfitRef != "" {
+		fmt.Printf("   ✓ Over-outfit: %s\n", filepath.Base(modOverOutfitRef))
 	}
 	if modStyleRef != "" {
 		fmt.Printf("   ✓ Style: %s\n", filepath.Base(modStyleRef))

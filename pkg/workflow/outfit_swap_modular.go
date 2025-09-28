@@ -62,9 +62,15 @@ func (o *Orchestrator) runOutfitSwapModularWorkflow(outfitSourcePath string, opt
 		return nil, err
 	}
 
+	overOutfitFiles, err := collectFilesForComponent(options.OverOutfitRef, "over-outfit")
+	if err != nil {
+		return nil, err
+	}
+
 	// Calculate total images
 	totalImages := len(targetImages) *
 		maxInt(1, len(outfitFiles)) *
+		maxInt(1, len(overOutfitFiles)) *
 		maxInt(1, len(styleFiles)) *
 		maxInt(1, len(hairStyleFiles)) *
 		maxInt(1, len(hairColorFiles)) *
@@ -85,6 +91,9 @@ func (o *Orchestrator) runOutfitSwapModularWorkflow(outfitSourcePath string, opt
 	fmt.Printf("   Subjects: %d\n", len(targetImages))
 	if len(outfitFiles) > 0 {
 		fmt.Printf("   Outfits: %d\n", len(outfitFiles))
+	}
+	if len(overOutfitFiles) > 0 {
+		fmt.Printf("   Over-outfits: %d\n", len(overOutfitFiles))
 	}
 	if len(styleFiles) > 0 {
 		fmt.Printf("   Styles: %d\n", len(styleFiles))
@@ -131,33 +140,38 @@ func (o *Orchestrator) runOutfitSwapModularWorkflow(outfitSourcePath string, opt
 	generatedCount := 0
 	for _, subject := range targetImages {
 		for _, outfit := range ensureAtLeastOne(outfitFiles) {
-			for _, style := range ensureAtLeastOne(styleFiles) {
-				for _, hairStyle := range ensureAtLeastOne(hairStyleFiles) {
-					for _, hairColor := range ensureAtLeastOne(hairColorFiles) {
-						for _, makeup := range ensureAtLeastOne(makeupFiles) {
-							for _, expression := range ensureAtLeastOne(expressionFiles) {
-								for _, accessories := range ensureAtLeastOne(accessoriesFiles) {
-									// Create modular config
-									config := ModularConfig{
-										SubjectPath:    subject,
-										OutfitRef:      outfit,
-										StyleRef:       style,
-										HairStyleRef:   hairStyle,
-										HairColorRef:   hairColor,
-										MakeupRef:      makeup,
-										ExpressionRef:  expression,
-										AccessoriesRef: accessories,
-										Variations:     options.Variations,
-										SendOriginal:   options.SendOriginal,
-										Debug:          options.DebugPrompt,
-										OutputDir:      outputDir,
-									}
+			for _, overOutfit := range ensureAtLeastOne(overOutfitFiles) {
+				for _, style := range ensureAtLeastOne(styleFiles) {
+					for _, hairStyle := range ensureAtLeastOne(hairStyleFiles) {
+						for _, hairColor := range ensureAtLeastOne(hairColorFiles) {
+							for _, makeup := range ensureAtLeastOne(makeupFiles) {
+								for _, expression := range ensureAtLeastOne(expressionFiles) {
+									for _, accessories := range ensureAtLeastOne(accessoriesFiles) {
+										// Create modular config
+										config := ModularConfig{
+											SubjectPath:    subject,
+											OutfitRef:      outfit,
+											OverOutfitRef:  overOutfit,
+											StyleRef:       style,
+											HairStyleRef:   hairStyle,
+											HairColorRef:   hairColor,
+											MakeupRef:      makeup,
+											ExpressionRef:  expression,
+											AccessoriesRef: accessories,
+											Variations:     options.Variations,
+											SendOriginal:   options.SendOriginal,
+											Debug:          options.DebugPrompt,
+											OutputDir:      outputDir,
+										}
 
 									// Display current combination
 									fmt.Printf("\n🎨 Processing combination:\n")
 									fmt.Printf("   Subject: %s\n", filepath.Base(subject))
 									if outfit != "" {
 										fmt.Printf("   Outfit: %s\n", filepath.Base(outfit))
+									}
+									if overOutfit != "" {
+										fmt.Printf("   Over-outfit: %s\n", filepath.Base(overOutfit))
 									}
 									if style != "" {
 										fmt.Printf("   Style: %s\n", filepath.Base(style))
@@ -194,6 +208,7 @@ func (o *Orchestrator) runOutfitSwapModularWorkflow(outfitSourcePath string, opt
 											Message:    fmt.Sprintf("Generated %s", filepath.Base(outputPath)),
 										})
 										generatedCount++
+										}
 									}
 								}
 							}
@@ -301,5 +316,6 @@ func hasModularComponents(options WorkflowOptions) bool {
 		options.HairColorRef != "" ||
 		options.MakeupRef != "" ||
 		options.ExpressionRef != "" ||
-		options.AccessoriesRef != ""
+		options.AccessoriesRef != "" ||
+		options.OverOutfitRef != ""
 }

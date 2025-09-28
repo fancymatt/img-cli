@@ -5,6 +5,7 @@ import "encoding/json"
 // ModularComponents holds analyzed component data
 type ModularComponents struct {
 	Outfit      *ComponentData
+	OverOutfit  *ComponentData // Base layer outfit that the main outfit is worn over
 	Style       *ComponentData
 	HairStyle   *ComponentData
 	HairColor   *ComponentData

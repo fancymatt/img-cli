@@ -34,8 +34,15 @@ func (c *CombinedGenerator) Generate(params GenerateParams) (*GenerateResult, er
 	// Check if we're using outfit image instead of text description
 	useOutfitImage := params.SendOriginal && params.OutfitReference != "" && params.Prompt == ""
 
-	// Start with base instructions
-	promptBuilder.WriteString("Generate an image of this person with EXACT COLOR AND DETAIL ACCURACY.\n")
+	// Start with base instructions - but let style control framing if provided
+	if params.StyleData != nil {
+		promptBuilder.WriteString("⚠️ CRITICAL: Create an image with the EXACT framing/composition from the style below.\n")
+		promptBuilder.WriteString("The person image provided is ONLY for outfit/appearance reference.\n")
+		promptBuilder.WriteString("DO NOT default to portrait or full-body - follow the style's framing EXACTLY.\n")
+		promptBuilder.WriteString("If style shows only arms, show ONLY arms. If only legs, show ONLY legs.\n\n")
+	} else {
+		promptBuilder.WriteString("Generate an image of this person with EXACT COLOR AND DETAIL ACCURACY.\n")
+	}
 
 	if useOutfitImage {
 		// Using outfit image reference instead of text description
@@ -131,7 +138,12 @@ func (c *CombinedGenerator) Generate(params GenerateParams) (*GenerateResult, er
 				promptBuilder.WriteString(fmt.Sprintf("- Background: %s\n", style.Background))
 			}
 
-			promptBuilder.WriteString("\nIMPORTANT: The pose, body position, film grain, and era aesthetic MUST be replicated exactly as described.\n")
+			promptBuilder.WriteString("\n🚨 CRITICAL FRAMING INSTRUCTION:\n")
+			promptBuilder.WriteString("The framing description above is ABSOLUTE and OVERRIDES any default assumptions.\n")
+			promptBuilder.WriteString("- If framing shows only arms/hands, show ONLY arms/hands\n")
+			promptBuilder.WriteString("- If subject is described as background element, keep them in background\n")
+			promptBuilder.WriteString("- DO NOT default to portrait or full-body unless framing explicitly says so\n")
+			promptBuilder.WriteString("The pose, body position, framing, and composition MUST be replicated EXACTLY as described.\n")
 			promptBuilder.WriteString("\nCRITICAL: DO NOT add ANY clothing, accessories, or outfit elements from the style reference image. NO hats, jewelry, or any other accessories should be added based on the style reference. Glasses/eyewear should ONLY match what the subject originally has - if they have glasses, keep them; if not, don't add them. The style ONLY affects photographic qualities and body pose.\n")
 		}
 	}

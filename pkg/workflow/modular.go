@@ -18,6 +18,7 @@ import (
 type ModularConfig struct {
 	SubjectPath    string
 	OutfitRef      string
+	OverOutfitRef  string // Base layer outfit that the main outfit is worn over
 	StyleRef       string
 	HairStyleRef   string
 	HairColorRef   string
@@ -189,15 +190,38 @@ func (o *Orchestrator) analyzeModularComponents(config ModularConfig) (*models.M
 				return nil, fmt.Errorf("failed to analyze outfit: %w", err)
 			}
 
-			desc := o.extractOutfitDescription(data)
-			if config.Debug {
-				fmt.Printf("  DEBUG: Outfit description extracted: %s\n", desc)
-			}
-			components.Outfit = &models.ComponentData{
-				Type:        "outfit",
-				Description: desc,
-				JSONData:    data,
-				ImagePath:   config.OutfitRef,
+			// If there's an over-outfit, we only want the outer layer from the main outfit
+			var desc string
+			if config.OverOutfitRef != "" {
+				desc = o.extractOuterLayerOnly(data)
+				if desc == "" {
+					// If no outer layer found, skip this outfit component
+					fmt.Printf("    No outer layer (jacket/coat) found in main outfit, will use over-outfit as complete outfit\n")
+					// Don't set components.Outfit so we only use the over-outfit
+				} else {
+					fmt.Printf("    Extracted outer layer only (jacket/coat) from main outfit\n")
+					if config.Debug {
+						fmt.Printf("  DEBUG: Outer layer only extracted: %s\n", desc)
+					}
+					components.Outfit = &models.ComponentData{
+						Type:        "outfit",
+						Description: desc,
+						JSONData:    data,
+						ImagePath:   config.OutfitRef,
+					}
+				}
+			} else {
+				// No over-outfit, use the full outfit description
+				desc = o.extractOutfitDescription(data)
+				if config.Debug {
+					fmt.Printf("  DEBUG: Full outfit description extracted: %s\n", desc)
+				}
+				components.Outfit = &models.ComponentData{
+					Type:        "outfit",
+					Description: desc,
+					JSONData:    data,
+					ImagePath:   config.OutfitRef,
+				}
 			}
 		} else {
 			// It's a text description
@@ -205,6 +229,40 @@ func (o *Orchestrator) analyzeModularComponents(config ModularConfig) (*models.M
 			components.Outfit = &models.ComponentData{
 				Type:        "outfit",
 				Description: config.OutfitRef,
+				JSONData:    nil,
+				ImagePath:   "",
+			}
+		}
+	}
+
+	// Analyze over-outfit (layered on top)
+	if config.OverOutfitRef != "" {
+		if isFilePath(config.OverOutfitRef) {
+			fmt.Printf("  Analyzing over-outfit from: %s\n", filepath.Base(config.OverOutfitRef))
+
+			// Use modular outfit analyzer with exclusions for the over-outfit too
+			modularAnalyzer := analyzer.NewModularOutfitAnalyzer(o.client, excludeOpts)
+			data, err := o.analyzeWithCache("outfit", config.OverOutfitRef, modularAnalyzer)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze over-outfit: %w", err)
+			}
+
+			desc := o.extractOutfitDescription(data)
+			if config.Debug {
+				fmt.Printf("  DEBUG: Over-outfit description extracted: %s\n", desc)
+			}
+			components.OverOutfit = &models.ComponentData{
+				Type:        "over_outfit",
+				Description: desc,
+				JSONData:    data,
+				ImagePath:   config.OverOutfitRef,
+			}
+		} else {
+			// It's a text description
+			fmt.Printf("  Using text description for over-outfit: %s\n", config.OverOutfitRef)
+			components.OverOutfit = &models.ComponentData{
+				Type:        "over_outfit",
+				Description: config.OverOutfitRef,
 				JSONData:    nil,
 				ImagePath:   "",
 			}
@@ -418,13 +476,62 @@ func (o *Orchestrator) analyzeWithCache(cacheType string, imagePath string, anal
 func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) string {
 	var parts []string
 
-	parts = append(parts, "Generate a professional 9:16 portrait photograph with the following specifications:")
+	// Check if this is a POV/first-person style
+	isPOV := components.Style != nil && (
+		strings.Contains(strings.ToLower(components.Style.Description), "first-person") ||
+		strings.Contains(strings.ToLower(components.Style.Description), "first person") ||
+		strings.Contains(strings.ToLower(components.Style.Description), "pov") ||
+		strings.Contains(strings.ToLower(components.Style.Description), "extreme close-up on the subject's hands"))
+
+	// Only specify portrait format if no style is provided
+	// If style is provided, it controls the framing and composition
+	if isPOV {
+		parts = append(parts, "🚨 THIS IS A FIRST-PERSON POV SHOT - CRITICAL INSTRUCTIONS 🚨")
+		parts = append(parts, "")
+		parts = append(parts, "1. FRAMING: Create a FIRST-PERSON PERSPECTIVE exactly as shown in the style image")
+		parts = append(parts, "2. The camera IS the subject's eyes - shoot FROM their viewpoint, not AT them")
+		parts = append(parts, "3. COPY THE EXACT FRAMING from the style image")
+		parts = append(parts, "")
+		parts = append(parts, "IMPORTANT: The person in the reference image IS the subject, but shown from THEIR OWN perspective:")
+		parts = append(parts, "- Their hands/arms in frame = the subject's own hands reaching forward")
+		parts = append(parts, "- If there's a mirror = show the subject's EXACT face/features reflected in it")
+		parts = append(parts, "- Preserve their facial features, hair, skin tone, and identity completely")
+		parts = append(parts, "- Apply their outfit to whatever body parts are visible in the POV framing")
+		parts = append(parts, "")
+	} else if components.Style != nil {
+		parts = append(parts, "⚠️ CRITICAL INSTRUCTION: Create an image that EXACTLY matches the framing and composition described in the PHOTOGRAPHIC STYLE section below.")
+		parts = append(parts, "DO NOT create a portrait or full-body shot unless the style explicitly describes one.")
+		parts = append(parts, "The provided person image is ONLY for extracting outfit/appearance details to apply to whatever framing the style requires.")
+		parts = append(parts, "If the style shows only legs, show ONLY legs. If only arms, show ONLY arms.")
+		parts = append(parts, "")
+		parts = append(parts, "The style description below is the ABSOLUTE AUTHORITY on what appears in frame.")
+	} else {
+		parts = append(parts, "Generate a professional 9:16 portrait photograph with the following specifications:")
+	}
 	parts = append(parts, "")
 
 	// Add outfit description
-	if components.Outfit != nil {
+	if components.Outfit != nil && components.OverOutfit != nil {
+		// Layered outfit: outer layer from main outfit + complete base outfit from --over-outfit
+		parts = append(parts, "LAYERED OUTFIT:")
+		parts = append(parts, "")
+		parts = append(parts, "COMPLETE BASE OUTFIT (all clothing worn underneath):")
+		parts = append(parts, components.OverOutfit.Description)  // --over-outfit provides the full base outfit
+		parts = append(parts, "")
+		parts = append(parts, "OUTER LAYER ONLY (jacket/coat worn over the base outfit):")
+		parts = append(parts, components.Outfit.Description)  // main outfit provides only the outer layer
+		parts = append(parts, "")
+		parts = append(parts, "IMPORTANT: The base outfit should be complete (shirt, pants/skirt, etc.), with the outer layer (jacket/coat) worn over it. Parts of the base outfit should be visible where the outer layer is open or doesn't cover (e.g., shirt collar, sleeves, pants/skirt).")
+		parts = append(parts, "")
+	} else if components.Outfit != nil {
+		// Single outfit
 		parts = append(parts, "OUTFIT:")
 		parts = append(parts, components.Outfit.Description)
+		parts = append(parts, "")
+	} else if components.OverOutfit != nil {
+		// Only over-outfit specified (treat as single outfit)
+		parts = append(parts, "OUTFIT:")
+		parts = append(parts, components.OverOutfit.Description)
 		parts = append(parts, "")
 	}
 
@@ -487,20 +594,67 @@ func (o *Orchestrator) buildModularPrompt(components *models.ModularComponents) 
 
 	// Add style description last (photographic style)
 	if components.Style != nil {
-		parts = append(parts, "PHOTOGRAPHIC STYLE (CONTROLS CAMERA ANGLE AND COMPOSITION):")
+		// Re-use the isPOV check from above (it's already been calculated)
+
+		parts = append(parts, "")
+		parts = append(parts, "==================================================")
+		if isPOV {
+			parts = append(parts, "🚨 FIRST-PERSON POV STYLE - CRITICAL INSTRUCTIONS 🚨")
+		} else {
+			parts = append(parts, "🚨 PHOTOGRAPHIC STYLE - THIS IS YOUR PRIMARY INSTRUCTION 🚨")
+		}
+		parts = append(parts, "==================================================")
+		parts = append(parts, "")
+
+		if isPOV {
+			parts = append(parts, "⚠️ THIS IS A FIRST-PERSON POV SHOT ⚠️")
+			parts = append(parts, "You MUST create the image from the subject's own perspective looking down/forward")
+			parts = append(parts, "NOT a third-person view of the subject!")
+			parts = append(parts, "")
+		}
+
+		parts = append(parts, "RECREATE THIS EXACT COMPOSITION:")
 		parts = append(parts, components.Style.Description)
-		parts = append(parts, "CRITICAL: This photographic style section OVERRIDES all other components for:")
-		parts = append(parts, "- Camera angle and framing")
-		parts = append(parts, "- Where the subject is looking (e.g., at camera, in mirror, to the side)")
-		parts = append(parts, "- Composition and perspective")
-		parts = append(parts, "- Lighting and atmosphere")
-		parts = append(parts, "If the style shows someone looking in a mirror, the subject MUST be looking in a mirror, not at the camera.")
+		parts = append(parts, "")
+		parts = append(parts, "ABSOLUTE REQUIREMENTS:")
+
+		if isPOV {
+			parts = append(parts, "1. This is POV - shoot FROM the subject's eyes, not AT them")
+			parts = append(parts, "2. Hands/arms in foreground = the subject's OWN hands (match their skin tone)")
+			parts = append(parts, "3. Mirror reflection = the subject's EXACT face (preserve all facial features)")
+			parts = append(parts, "4. The subject's identity must be clearly recognizable in any reflections")
+			parts = append(parts, "5. Match the subject's: facial structure, eye color, hair color/style, skin tone")
+			parts = append(parts, "6. Apply outfit details to visible body parts in the POV framing")
+		} else {
+			parts = append(parts, "1. Match the framing EXACTLY as described above")
+			parts = append(parts, "2. If it says 'only arms visible' - show ONLY arms, NOT the full person")
+			parts = append(parts, "3. If it says 'legs only' - show ONLY legs, NOT the full person")
+			parts = append(parts, "4. If it says 'person in background' - keep them in background, NOT as main subject")
+			parts = append(parts, "5. The person/subject image provided earlier is ONLY for outfit/appearance details")
+			parts = append(parts, "6. DO NOT create a portrait unless the style explicitly describes a portrait")
+		}
+
+		parts = append(parts, "")
+		parts = append(parts, "THINK OF THIS AS: Taking the outfit/appearance from the person image and applying it to")
+		parts = append(parts, "the EXACT framing/composition/perspective described in the style above.")
+		parts = append(parts, "")
+		parts = append(parts, "==================================================")
 		parts = append(parts, "")
 	}
 
 	// Add standard requirements
 	parts = append(parts, "TECHNICAL REQUIREMENTS:")
-	parts = append(parts, "- Maintain exact facial features and identity from the original photo")
+	if isPOV {
+		parts = append(parts, "- This is the subject's POV - preserve their EXACT identity in any visible reflections")
+		parts = append(parts, "- Mirror reflections must show the subject's precise facial features from the reference")
+		parts = append(parts, "- Visible hands/arms must match the subject's skin tone and body type")
+		parts = append(parts, "- Maintain the subject's exact hair color, style, and facial structure")
+	} else if components.Style != nil {
+		parts = append(parts, "- Apply the clothing and appearance details from the provided images to the framing specified by the style")
+		parts = append(parts, "- If face is visible in the style framing, maintain exact facial features from the original photo")
+	} else {
+		parts = append(parts, "- Maintain exact facial features and identity from the original photo")
+	}
 	// Add makeup preservation note
 	if components.Makeup != nil {
 		parts = append(parts, "- PRESERVE facial bone structure, face shape, and all anatomical features - makeup is cosmetic only")

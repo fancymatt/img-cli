@@ -27,6 +27,7 @@ type WorkflowOptions struct {
 	MakeupRef      string
 	ExpressionRef  string
 	AccessoriesRef string
+	OverOutfitRef  string // Base layer outfit that the main outfit is worn over
 }
 
 type WorkflowResult struct {

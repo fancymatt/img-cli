@@ -54,6 +54,59 @@ func (o *Orchestrator) extractOutfitDescription(data json.RawMessage) string {
 	return "Standard outfit"
 }
 
+// extractOuterLayerOnly extracts only the outermost layer (jacket/coat) from outfit analysis
+func (o *Orchestrator) extractOuterLayerOnly(data json.RawMessage) string {
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ""
+	}
+
+	var outerPieces []string
+
+	// Keywords that indicate outer layers
+	outerKeywords := []string{
+		"jacket", "coat", "blazer", "cardigan", "hoodie", "sweater",
+		"vest", "cape", "cloak", "shawl", "poncho", "parka", "windbreaker",
+		"bomber", "denim jacket", "leather jacket", "trench", "peacoat",
+		"overcoat", "duster", "anorak", "mac", "raincoat",
+	}
+
+	// Check if it's a cached entry with nested structure
+	var clothingItems []interface{}
+	if analysisData, ok := result["analysis"].(map[string]interface{}); ok {
+		if clothing, ok := analysisData["clothing"].([]interface{}); ok {
+			clothingItems = clothing
+		}
+	} else {
+		if clothing, ok := result["clothing"].([]interface{}); ok {
+			clothingItems = clothing
+		}
+	}
+
+	// Process clothing items and extract only outer layers
+	for _, item := range clothingItems {
+		if str, ok := item.(string); ok {
+			itemLower := strings.ToLower(str)
+			// Check if this item is an outer layer
+			for _, keyword := range outerKeywords {
+				if strings.Contains(itemLower, keyword) {
+					// Found an outer layer piece
+					outerPieces = append(outerPieces, str)
+					break
+				}
+			}
+		}
+	}
+
+	// If we found outer pieces, return them
+	if len(outerPieces) > 0 {
+		return strings.Join(outerPieces, ". ")
+	}
+
+	// If no specific outer layer was found, return empty
+	return ""
+}
+
 // extractStyleDescription extracts visual style description from analysis
 func (o *Orchestrator) extractStyleDescription(data json.RawMessage) string {
 	var result map[string]interface{}
@@ -62,6 +115,27 @@ func (o *Orchestrator) extractStyleDescription(data json.RawMessage) string {
 	}
 
 	var parts []string
+
+	// CRITICAL: Extract framing and camera angle FIRST - these define the shot
+	if framing, ok := result["framing"].(string); ok && framing != "" {
+		parts = append(parts, fmt.Sprintf("FRAMING (MUST MATCH EXACTLY): %s", framing))
+	}
+
+	if cameraAngle, ok := result["camera_angle"].(string); ok && cameraAngle != "" {
+		parts = append(parts, fmt.Sprintf("CAMERA ANGLE (MUST MATCH EXACTLY): %s", cameraAngle))
+	}
+
+	if pose, ok := result["pose"].(string); ok && pose != "" {
+		parts = append(parts, fmt.Sprintf("POSE: %s", pose))
+	}
+
+	if bodyPosition, ok := result["body_position"].(string); ok && bodyPosition != "" {
+		parts = append(parts, fmt.Sprintf("BODY POSITION: %s", bodyPosition))
+	}
+
+	if composition, ok := result["composition"].(string); ok && composition != "" {
+		parts = append(parts, fmt.Sprintf("COMPOSITION: %s", composition))
+	}
 
 	if lighting, ok := result["lighting"].(string); ok && lighting != "" {
 		parts = append(parts, fmt.Sprintf("Lighting: %s", lighting))

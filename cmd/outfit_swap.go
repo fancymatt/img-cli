@@ -27,6 +27,7 @@ var (
 	outfitMakeup      string
 	outfitExpression  string
 	outfitAccessories string
+	outfitOverOutfit  string
 )
 
 // Default values for common parameters
@@ -68,6 +69,13 @@ Examples:
     --makeup ./makeup/natural.png \
     -t "jaimee kat"
 
+  # Layered outfits (jacket from first outfit worn over complete second outfit)
+  img-cli outfit-swap ./outfits/punk-jacket.png \
+    --over-outfit ./outfits/dress.png \
+    --style ./styles/winter.png \
+    -t sarah
+  # Result: dress + only the jacket from punk-jacket outfit
+
 Default values:
   Outfit:  ./outfits/shearling-black.png
   Style:   ./styles/plain-white.png
@@ -90,7 +98,10 @@ func init() {
 	outfitSwapCmd.Flags().StringVar(&outfitHairColor, "hair-color", "", "Hair color reference image or directory")
 	outfitSwapCmd.Flags().StringVar(&outfitMakeup, "makeup", "", "Makeup reference image or directory")
 	outfitSwapCmd.Flags().StringVar(&outfitExpression, "expression", "", "Expression reference image or directory")
-	outfitSwapCmd.Flags().StringVar(&outfitAccessories, "accessories", "", "Accessories reference image or directory")
+	outfitSwapCmd.Flags().StringVarP(&outfitAccessories, "accessories", "a", "", "Accessories reference image or directory")
+	outfitSwapCmd.Flags().StringVar(&outfitAccessories, "accessory", "", "Accessories reference image or directory (alias for --accessories)")
+	outfitSwapCmd.Flags().MarkHidden("accessory") // Hide from help to avoid clutter, but still works
+	outfitSwapCmd.Flags().StringVar(&outfitOverOutfit, "over-outfit", "", "Complete base outfit; main outfit's outer layer (jacket/coat) will be worn over this")
 
 	// Additional options
 	outfitSwapCmd.Flags().BoolVar(&outfitSendOriginal, "send-original", false, "Include reference images in API requests")
@@ -222,6 +233,7 @@ func runOutfitSwap(cmd *cobra.Command, args []string) error {
 		MakeupRef:      outfitMakeup,
 		ExpressionRef:  outfitExpression,
 		AccessoriesRef: outfitAccessories,
+		OverOutfitRef:  outfitOverOutfit,
 	}
 
 	// Initialize orchestrator
